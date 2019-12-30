@@ -42,32 +42,30 @@ public:
 		N = (1 << 7),	// Negative
 	};
 
-	uint8_t a = 0x00; // Accumulator register (this is where we store temp numbers for arithmetic)
+	// I don't think SPG290 has an accumulator, so we probs don't need this
+	uint8_t acc = 0x00; // Accumulator register (this is where we store temp numbers for arithmetic)
 	uint8_t x = 0x00; // X register
 	uint8_t y = 0x00; // Y register
 	uint8_t stkp = 0x00; // stack pointer (points to location on bus)
 
-	// program counter... maybe 16-bits??
-	uint16_t pc = 0x0000;
+	// program counter, 32 bits
+	uint32_t pc = 0x00000000;
 
 	// status register
 	uint8_t status = 0x00;
 
 	void clock();
 
-	uint8_t fetch();
-	uint8_t fetched = 0x00;
-
 private:
 
 	Bus		*bus = nullptr;
-	uint8_t read(uint16_t a);
-	void	write(uint16_t a, uint8_t d);
+	uint32_t read(uint32_t a);
+	void	write(uint32_t a, uint8_t d);
 
 	uint8_t GetFlag(FLAGS290 f);
 	void	SetFlag(FLAGS290 f, bool v);
 
-	uint8_t  opcode = 0x00;    // Is the instruction byte
+	uint32_t  instr = 0x00;    // Is the instruction byte
 	uint8_t  cycles = 0;	   // Counts how many cycles the instruction has remaining
 
 	struct INSTRUCTION
@@ -80,6 +78,13 @@ private:
 	std::vector<INSTRUCTION> lookup;
 
 private:
+	// masks out bits 30-26 of instr which are the opcode
+	uint32_t	OPCODE_MASK	= 0x7C000000;
+	
+	// masks out bits 6-1 of instr which are func6 (for "Special-Form" Instructions) 
+	// see page 12 of S+Core7 programmers manual
+	uint8_t		func6_MASK	= 0x7E;
+
 	/* OPCODES */
 	uint8_t ANDX();		// Logical AND	
 	uint8_t UNDEF();	// catches undefined opcodes
