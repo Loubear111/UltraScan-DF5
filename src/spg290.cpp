@@ -63,9 +63,9 @@ uint8_t spg290::ANDX()
 	uint8_t d_reg, a_reg, b_reg;
 	
 	// Extract register locations from instruction word
-	d_reg = (instr & 0x3E00000) >> 21;
-	a_reg = (instr & 0x1F0000) >> 16;
-	b_reg = (instr & 0x7C00) >> 10;
+	d_reg = (instr & 0x3E00000) >> 21;	// bits 25-21 (see s+core7 pg. 12)
+	a_reg = (instr & 0x1F0000) >> 16;	// bits 20-16 (see s+core7 pg. 12)
+	b_reg = (instr & 0x7C00) >> 10;		// bits 14-10 (see s+core7 pg. 12)
 
 	// get the values stored in registers
 	a = read(a_reg);
