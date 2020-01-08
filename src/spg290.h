@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <cstdint>
 
 class Bus;
 
@@ -87,6 +88,7 @@ private:
 	uint8_t		func6_MASK	= 0x7E;
 
 	/* OPCODES */
-	uint8_t ANDX();		// Logical AND	
+	uint8_t ANDX();		// Logical AND
+	uint8_t ORX();
 	uint8_t UNDEF();	// catches undefined opcodes
 };

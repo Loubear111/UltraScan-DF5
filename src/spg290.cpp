@@ -126,6 +126,14 @@ uint8_t spg290::ORX()
     // perform operation
     d = a | b;
 
+    if (instr & CU_MASK)
+    {
+        // If result is 0, set Z flag bit
+        SetFlag(Z, d == 0);
+        // If result is negative number, set N flag bit
+        SetFlag(N, (d >> 31) == 0);
+    }
+
     // write back the result of the operation
     write(d_reg, d);
 
