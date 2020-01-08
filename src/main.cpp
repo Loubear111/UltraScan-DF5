@@ -8,7 +8,7 @@ int main()
 	Bus HyperScan;
 
 	// Here we're assigning values to arbitrary locations to test instruction to register funcitionality
-	HyperScan.ram[10] = 0b0110; // A register
+	HyperScan.ram[10] = 0xFFFF45E6; // A register
 	HyperScan.ram[11] = 0b0010; // B register
 	HyperScan.ram[12] = 0xFFFFFFFF; // D register
 
@@ -16,6 +16,7 @@ int main()
 	// we're just assuming PC starts at 0 and the first instruction is at 0 in memory
 	HyperScan.ram[0] = 0x818A2C20; // ANDX D, A, B
 	HyperScan.ram[0] = 0x85937FFE; // ANDIX D, 0xFFFF
+	HyperScan.ram[0] = 0xB18A469C; // ANDRIX D, A, 0x234E
 
 	cout << "***HyperScan CPU Test***" << endl;
 

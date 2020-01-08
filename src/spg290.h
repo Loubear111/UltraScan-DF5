@@ -97,5 +97,6 @@ private:
 	/* OPCODES */
 	uint8_t ANDX();		// Logical AND	
 	uint8_t ANDIX();	// Logical AND with Immediate
+	uint8_t ANDRIX();	// Logical AND Register with Immediate
 	uint8_t UNDEF();	// catches undefined opcodes
 };
