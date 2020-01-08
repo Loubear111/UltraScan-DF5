@@ -8,13 +8,15 @@ int main()
 	Bus HyperScan;
 
 	// Here we're assigning values to arbitrary locations to test instruction to register funcitionality
-	HyperScan.ram[10] = 0b0110; // A register
+	HyperScan.ram[10] = 0xFFFF45E6; // A register
 	HyperScan.ram[11] = 0b0010; // B register
-	HyperScan.ram[12] = 0x0000; // D register
+	HyperScan.ram[12] = 0xFFFFFFFF; // D register
 
 	// if you decode this instruction you'll see it uses the registers set above
 	// we're just assuming PC starts at 0 and the first instruction is at 0 in memory
 	HyperScan.ram[0] = 0x818A2C20; // ANDX D, A, B
+	HyperScan.ram[0] = 0x85937FFE; // ANDIX D, 0xFFFF
+	HyperScan.ram[0] = 0xB18A469C; // ANDRIX D, A, 0x234E
 
 	cout << "***HyperScan CPU Test***" << endl;
 
@@ -25,6 +27,18 @@ int main()
 		cout << hex << i;
 		cout << ": ";
 		cout << hex << HyperScan.ram[i];
+		if (i == 10)
+		{
+			cout << "	(A reg)";
+		}
+		else if (i == 11)
+		{
+			cout << "	(B reg)";
+		}
+		else if (i == 12)
+		{
+			cout << "	(D reg)";
+		}
 		cout << endl;
 	}
 
@@ -40,6 +54,18 @@ int main()
 		cout << hex << i;
 		cout << ": ";
 		cout << hex << HyperScan.ram[i];
+		if (i == 10)
+		{
+			cout << "	(A reg)";
+		}
+		else if (i == 11)
+		{
+			cout << "	(B reg)";
+		}
+		else if (i == 12)
+		{
+			cout << "	(D reg)";
+		}
 		cout << endl;
 	}
 

@@ -62,8 +62,8 @@ public:
 private:
 
 	Bus		*bus = nullptr;
-	uint32_t read(uint32_t a);
-	void	write(uint32_t a, uint8_t d);
+	uint32_t read(uint16_t a);
+	void	write(uint16_t a, uint32_t d);
 
 	void	SetFlag(FLAGS290 f, bool v);
 
@@ -82,13 +82,23 @@ private:
 private:
 	// masks out bits 30-26 of instr which are the opcode
 	uint32_t	OPCODE_MASK	= 0x7C000000;
-	
+
+	// masks out the first bit (CU bit) of instruction
+	// this is used to determine if CPU flags are set or not
+	uint8_t		CU_MASK		= 0x1;
+
 	// masks out bits 6-1 of instr which are func6 (for "Special-Form" Instructions) 
 	// see page 12 of S+Core7 programmers manual
 	uint8_t		func6_MASK	= 0x7E;
 
+	// masks out bits 20-18 of instr which are func3 (for "I-Form" Instructions)
+	// see page 12 of S+Core7 programmers manual
+	uint32_t	func3_MASK	= 0x1C0000;
+
 	/* OPCODES */
 	uint8_t ANDX();		// Logical AND
-	uint8_t ORX();
-	uint8_t UNDEF();	// catches undefined opcodes
+	uint8_t ANDIX();	// Logical AND with Immediate
+	uint8_t ANDRIX();	// Logical AND Register with Immediate
+    uint8_t ORX();      // Logical OR
+    uint8_t UNDEF();	// catches undefined opcodes
 };
