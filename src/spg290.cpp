@@ -21,6 +21,21 @@ void spg290::write(uint32_t a, uint8_t d)
 	bus->write(a, d);
 }
 
+// Returns the value of a specific bit of the status register
+uint8_t spg290::GetFlag(FLAGS290 f)
+{
+	return ((status & f) > 0) ? 1 : 0;
+}
+
+// Sets or clears a specific bit of the status register
+void spg290::SetFlag(FLAGS290 f, bool v)
+{
+	if (v)
+		status |= f;
+	else
+		status &= ~f;
+}
+
 void spg290::clock()
 {
 	if (cycles == 0)
@@ -59,7 +74,7 @@ uint8_t spg290::ANDX()
 	// a: source reg
 	// b: source reg
 	// operation: d = a & b
-	uint8_t d, a, b;
+	uint32_t d, a, b;
 	uint8_t d_reg, a_reg, b_reg;
 	
 	// Extract register locations from instruction word
@@ -73,6 +88,11 @@ uint8_t spg290::ANDX()
 
 	// perform operation
 	d = a & b;
+
+	// If result is 0, set Z flag bit
+	SetFlag(Z, d == 0);
+	// If result is negative number, set N flag bit
+	SetFlag(N, (d >> 31) == 0);
 
 	// write back the result of the operation
 	write(d_reg, d);

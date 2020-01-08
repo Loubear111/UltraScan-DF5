@@ -54,6 +54,8 @@ public:
 	// status register
 	uint8_t status = 0x00;
 
+	uint8_t GetFlag(FLAGS290 f);
+
 	void clock();
 
 private:
@@ -62,7 +64,6 @@ private:
 	uint32_t read(uint32_t a);
 	void	write(uint32_t a, uint8_t d);
 
-	uint8_t GetFlag(FLAGS290 f);
 	void	SetFlag(FLAGS290 f, bool v);
 
 	uint32_t  instr = 0x00;    // Is the instruction byte
