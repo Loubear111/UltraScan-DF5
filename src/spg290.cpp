@@ -11,12 +11,12 @@ spg290::~spg290()
 {
 }
 
-uint32_t spg290::read(uint32_t a)
+uint32_t spg290::read(uint16_t a)
 {
 	return bus->read(a, false);
 }
 
-void spg290::write(uint32_t a, uint8_t d)
+void spg290::write(uint16_t a, uint32_t d)
 {
 	bus->write(a, d);
 }
@@ -128,7 +128,7 @@ uint8_t spg290::ANDIX()
 	// Extract the immediate value from the instruction word
 	// we have to do the shifting/masking shenanigans because bit 15
 	// of the instruction word falls in the middle of the 16-bit immediate
-	imm == (instr & 0x7FFE) || ((instr & 0x30000) >> 1);
+	imm = ((instr & 0x7FFE) >> 1) | ((instr & 0x30000) >> 2);
 
 	// perform operation
 	d = d & imm;
@@ -140,7 +140,6 @@ uint8_t spg290::ANDIX()
 		// If result is negative number, set N flag bit
 		SetFlag(N, (d >> 31) == 0);
 	}
-
 	// write back the result of the operation
 	write(d_reg, d);
 

@@ -61,8 +61,8 @@ public:
 private:
 
 	Bus		*bus = nullptr;
-	uint32_t read(uint32_t a);
-	void	write(uint32_t a, uint8_t d);
+	uint32_t read(uint16_t a);
+	void	write(uint16_t a, uint32_t d);
 
 	void	SetFlag(FLAGS290 f, bool v);
 
@@ -92,7 +92,7 @@ private:
 
 	// masks out bits 20-18 of instr which are func3 (for "I-Form" Instructions) 
 	// see page 12 of S+Core7 programmers manual
-	uint8_t		func3_MASK	= 0x1C0000;
+	uint32_t	func3_MASK	= 0x1C0000;
 
 	/* OPCODES */
 	uint8_t ANDX();		// Logical AND	
