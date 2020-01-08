@@ -67,6 +67,11 @@ void spg290::clock()
 				ANDIX();
 			}
 		}
+		else if (opcode == 0b01100)
+		{
+			// We have an ANDRIX instruction
+			ANDRIX();
+		}
 
 		// Just setting cycle per instruction to 1 for all instructions for now
 		// This will need to be changed later to by cycle accurate
@@ -132,6 +137,41 @@ uint8_t spg290::ANDIX()
 
 	// perform operation
 	d = d & imm;
+
+	if (instr & CU_MASK)
+	{
+		// If result is 0, set Z flag bit
+		SetFlag(Z, d == 0);
+		// If result is negative number, set N flag bit
+		SetFlag(N, (d >> 31) == 0);
+	}
+	// write back the result of the operation
+	write(d_reg, d);
+
+	return 1;
+}
+
+uint8_t spg290::ANDRIX()
+{
+	// d: destination reg
+	// operation: d = d & imm
+	uint32_t d, a;
+	uint16_t imm;
+	uint8_t d_reg, a_reg;
+
+	// Extract register locations from instruction word
+	d_reg = (instr & 0x3E00000) >> 21;	// bits 25-21 (see s+core7 pg. 12)
+	a_reg = (instr & 0x1F0000) >> 16;	// bits 20-16 (see s+core7 pg. 12)
+	
+	// get the values stored in registers
+	a = read(a_reg);
+
+	// Extract the immediate value from the instruction word
+	// here the immediate is 14-bits
+	imm = ((instr & 0x7FFE) >> 1);
+
+	// perform operation
+	d = a & imm;
 
 	if (instr & CU_MASK)
 	{
