@@ -126,46 +126,61 @@ TEST(PPURender, DisabledPPUProducesBackdrop)
 	ppu.write32(PPU::SPRITE_BASE + 0, 1u | (5u << 16));
 	ppu.write32(PPU::SPRITE_BASE + 4, (1u << 0) | (7u << 16));
 
-	auto fb = ppu.renderFrame(mem, BACKDROP);
+	// A clearly visible backdrop shows that a disabled PPU emits a uniform
+	// fill: the red sprite must NOT appear anywhere.
+	const Color OFF_SCREEN{0, 90, 140};
+	auto fb = ppu.renderFrame(mem, OFF_SCREEN);
 	ppu_artifacts::dump("render_disabled", fb, SCENE_W, SCENE_H);
 	ppu_artifacts::dumpGiant("giant_disabled", fb, SCENE_W, SCENE_H);
 	EXPECT_EQ(fb.size(), 320u * 240u);
-	for (const Color &c : fb) EXPECT_EQ(c, BACKDROP);
+	for (const Color &c : fb) EXPECT_EQ(c, OFF_SCREEN);
 }
 
 // --- Transparent character (charNum 0) is skipped entirely ------------------
 TEST(PPURender, CharNumZeroSpriteSkipped)
 {
 	PPU ppu = makeSpriteScene();
+	ppu.write32(PPU::P_SP_Max, 1); // enable sprites 0 and 1
 	ppu.setPaletteRaw(1, RED555);
 	FlatMemory mem(0, 0x4000);
-	fillBytes(mem, 0x1000, 64, 0x11);
+	fillBytes(mem, 0x1000 + 1 * 32, 32, 0x11); // char #1 = solid red
 
-	ppu.write32(PPU::SPRITE_BASE + 0, 0u | (5u << 16)); // charNum 0
-	ppu.write32(PPU::SPRITE_BASE + 4, (1u << 0) | (7u << 16));
+	// Sprite 0 references character 0 -> the transparent character, skipped.
+	ppu.write32(PPU::SPRITE_BASE + 0 * 8 + 0, 0u | (5u << 16));
+	ppu.write32(PPU::SPRITE_BASE + 0 * 8 + 4, (1u << 0) | (7u << 16));
+	// Sprite 1 references character 1 -> a visible red block as a control.
+	ppu.write32(PPU::SPRITE_BASE + 1 * 8 + 0, 1u | (20u << 16));
+	ppu.write32(PPU::SPRITE_BASE + 1 * 8 + 4, (1u << 0) | (7u << 16));
 
 	auto fb = ppu.renderFrame(mem, BACKDROP);
 	ppu_artifacts::dump("render_charnum_zero", fb, SCENE_W, SCENE_H);
 	ppu_artifacts::dumpGiant("giant_charnum_zero", fb, SCENE_W, SCENE_H);
-	EXPECT_EQ(at(fb, 5, 7), BACKDROP);
+	EXPECT_EQ(at(fb, 5, 7), BACKDROP); // char 0 sprite skipped
+	EXPECT_EQ(at(fb, 20, 7), RED);     // visible control sprite
 }
 
 // --- Palette Tr bit makes pixels transparent --------------------------------
 TEST(PPURender, PaletteTransparentIndexShowsBackdrop)
 {
 	PPU ppu = makeSpriteScene();
-	// Character #2 is all index 0; mark palette entry 0 transparent.
-	ppu.setPaletteRaw(0, 0x8000); // Tr set
+	// Character #2: left half palette index 0 (marked transparent), right
+	// half index 1 (opaque red) so the transparency is visible.
+	ppu.setPaletteRaw(0, 0x8000); // Tr set -> transparent
+	ppu.setPaletteRaw(1, RED555);
 
 	FlatMemory mem(0, 0x4000);
-	// char #2 region defaults to zero -> index 0 everywhere.
+	uint32_t cbase = 0x1000 + 2 * 32;
+	for (int y = 0; y < 8; y++)
+		for (int x = 0; x < 8; x++)
+			putPixel4(mem, cbase, 8, x, y, x < 4 ? 0 : 1);
 	ppu.write32(PPU::SPRITE_BASE + 0, 2u | (5u << 16));
 	ppu.write32(PPU::SPRITE_BASE + 4, (1u << 0) | (7u << 16));
 
 	auto fb = ppu.renderFrame(mem, BACKDROP);
 	ppu_artifacts::dump("render_palette_transparent", fb, SCENE_W, SCENE_H);
 	ppu_artifacts::dumpGiant("giant_palette_transparent", fb, SCENE_W, SCENE_H);
-	EXPECT_EQ(at(fb, 5, 7), BACKDROP);
+	EXPECT_EQ(at(fb, 5, 7), BACKDROP); // transparent half
+	EXPECT_EQ(at(fb, 11, 7), RED);     // opaque half
 }
 
 TEST(PPURender, OpaqueIndexZeroDrawsColor)
@@ -187,20 +202,25 @@ TEST(PPURender, OpaqueIndexZeroDrawsColor)
 TEST(PPURender, ColorKeyMakesMatchingPixelTransparent)
 {
 	PPU ppu = makeSpriteScene();
+	// Character #1: left half green (matches the colour key -> removed),
+	// right half blue (kept), so the effect is clearly visible.
 	ppu.setPaletteRaw(1, GREEN555);
-	// Enable colour key matching pure green expressed as RGB565.
-	uint16_t green565 = 0x07E0;
-	ppu.write32(PPU::P_Trans_RGB, PPU::TRANS_RGB_EN_BIT | green565);
+	ppu.setPaletteRaw(2, BLUE555);
+	ppu.write32(PPU::P_Trans_RGB, PPU::TRANS_RGB_EN_BIT | 0x07E0); // key = green565
 
 	FlatMemory mem(0, 0x4000);
-	fillBytes(mem, 0x1000 + 1 * 32, 32, 0x11);
+	uint32_t cbase = 0x1000 + 1 * 32;
+	for (int y = 0; y < 8; y++)
+		for (int x = 0; x < 8; x++)
+			putPixel4(mem, cbase, 8, x, y, x < 4 ? 1 : 2);
 	ppu.write32(PPU::SPRITE_BASE + 0, 1u | (5u << 16));
 	ppu.write32(PPU::SPRITE_BASE + 4, (1u << 0) | (7u << 16));
 
 	auto fb = ppu.renderFrame(mem, BACKDROP);
 	ppu_artifacts::dump("render_color_key", fb, SCENE_W, SCENE_H);
 	ppu_artifacts::dumpGiant("giant_color_key", fb, SCENE_W, SCENE_H);
-	EXPECT_EQ(at(fb, 5, 7), BACKDROP); // keyed out
+	EXPECT_EQ(at(fb, 5, 7), BACKDROP); // green half keyed out
+	EXPECT_EQ(at(fb, 11, 7), BLUE);    // blue half kept
 }
 
 // --- Character horizontal flip ----------------------------------------------
