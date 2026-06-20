@@ -1,0 +1,8 @@
+# Build artifacts
+*.o
+*.obj
+*.exe
+
+# Built binaries
+src/main
+tests/test_runner

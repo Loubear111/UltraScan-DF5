@@ -180,7 +180,6 @@ TEST_F(CPUFixture, ANDRIX_KnownGoodInstructionWord)
 
 TEST_F(CPUFixture, ANDISX_BasicResult)
 {
-    GTEST_SKIP() << "ANDISX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(12, 0xDEADBEEFu);
     execute(encodeANDISX(12, 0xFFFFu, false)); // mask = 0xFFFF0000
     EXPECT_EQ(getReg(12), 0xDEAD0000u);
@@ -188,7 +187,6 @@ TEST_F(CPUFixture, ANDISX_BasicResult)
 
 TEST_F(CPUFixture, ANDISX_CU_SetsZFlag)
 {
-    GTEST_SKIP() << "ANDISX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(12, 0x0000FFFFu); // upper 16 bits already zero
     execute(encodeANDISX(12, 0xFFFFu, true));
     EXPECT_EQ(getReg(12), 0u);

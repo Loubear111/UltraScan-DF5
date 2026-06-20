@@ -1,6 +1,6 @@
 #Compiler and Flags
 CXX = g++
-CXXFLAGS = -Wall -Wextra -std=c++14
+CXXFLAGS = -Wall -Wextra -std=c++17
 
 #target exe
 TARGET = main

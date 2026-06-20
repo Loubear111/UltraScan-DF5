@@ -10,7 +10,6 @@
 
 TEST_F(CPUFixture, ADDCX_BasicAddNoCarry)
 {
-    GTEST_SKIP() << "ADDCX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(5, 10u);  // rA
     setReg(6, 20u);  // rB
     execute(encodeADDCX(7, 5, 6, false));
@@ -19,7 +18,6 @@ TEST_F(CPUFixture, ADDCX_BasicAddNoCarry)
 
 TEST_F(CPUFixture, ADDCX_AddWithCarryIn)
 {
-    GTEST_SKIP() << "ADDCX opcode not yet mapped — add opcode and dispatch to clock() first";
     // Pre-set the carry flag by executing a prior instruction that sets it,
     // or write to bus.cpu.status directly if the member is public.
     // (status is public in spg290.h)
@@ -32,7 +30,6 @@ TEST_F(CPUFixture, ADDCX_AddWithCarryIn)
 
 TEST_F(CPUFixture, ADDCX_CarryOut_CUSet)
 {
-    GTEST_SKIP() << "ADDCX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(5, 0xFFFFFFFFu);
     setReg(6, 1u);
     execute(encodeADDCX(7, 5, 6, true)); // CU=1
@@ -43,7 +40,6 @@ TEST_F(CPUFixture, ADDCX_CarryOut_CUSet)
 
 TEST_F(CPUFixture, ADDCX_NoCarryOut_CUSet)
 {
-    GTEST_SKIP() << "ADDCX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(5, 1u);
     setReg(6, 1u);
     execute(encodeADDCX(7, 5, 6, true));
@@ -54,7 +50,6 @@ TEST_F(CPUFixture, ADDCX_NoCarryOut_CUSet)
 
 TEST_F(CPUFixture, ADDCX_NoCU_FlagsUntouched)
 {
-    GTEST_SKIP() << "ADDCX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(5, 0xFFFFFFFFu);
     setReg(6, 1u);
     execute(encodeADDCX(7, 5, 6, false)); // carry would set, but CU=0
@@ -68,7 +63,6 @@ TEST_F(CPUFixture, ADDCX_NoCU_FlagsUntouched)
 
 TEST_F(CPUFixture, ADDIX_PositiveImmediate)
 {
-    GTEST_SKIP() << "ADDIX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(12, 100u);
     execute(encodeADDIX(12, 50u, false));
     EXPECT_EQ(getReg(12), 150u);
@@ -77,7 +71,6 @@ TEST_F(CPUFixture, ADDIX_PositiveImmediate)
 // imm16 = 0xFFFF = -1 when sign-extended to 32 bits
 TEST_F(CPUFixture, ADDIX_NegativeImmediateSignExtended)
 {
-    GTEST_SKIP() << "ADDIX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(12, 100u);
     execute(encodeADDIX(12, 0xFFFFu, false)); // imm = -1 signed
     EXPECT_EQ(getReg(12), 99u);
@@ -85,7 +78,6 @@ TEST_F(CPUFixture, ADDIX_NegativeImmediateSignExtended)
 
 TEST_F(CPUFixture, ADDIX_CU_SetsZFlagWhenResultIsZero)
 {
-    GTEST_SKIP() << "ADDIX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(12, 1u);
     execute(encodeADDIX(12, 0xFFFFu, true)); // 1 + (-1) = 0
     EXPECT_EQ(getReg(12), 0u);
@@ -94,7 +86,6 @@ TEST_F(CPUFixture, ADDIX_CU_SetsZFlagWhenResultIsZero)
 
 TEST_F(CPUFixture, ADDIX_NoCU_FlagsUntouched)
 {
-    GTEST_SKIP() << "ADDIX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(12, 1u);
     execute(encodeADDIX(12, 0xFFFFu, false));
     EXPECT_EQ(getFlag(spg290::Z), 0);
@@ -107,7 +98,6 @@ TEST_F(CPUFixture, ADDIX_NoCU_FlagsUntouched)
 
 TEST_F(CPUFixture, ADDISX_ShiftedAdd)
 {
-    GTEST_SKIP() << "ADDISX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(12, 0u);
     execute(encodeADDISX(12, 1u, false)); // adds 0x00010000
     EXPECT_EQ(getReg(12), 0x00010000u);
@@ -115,7 +105,6 @@ TEST_F(CPUFixture, ADDISX_ShiftedAdd)
 
 TEST_F(CPUFixture, ADDISX_CU_SetsZFlagWhenResultIsZero)
 {
-    GTEST_SKIP() << "ADDISX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(12, 0xFFFF0000u);
     execute(encodeADDISX(12, 0x0001u, true)); // 0xFFFF0000 + 0x00010000 = 0 with overflow
     EXPECT_EQ(getFlag(spg290::Z), 1);
@@ -128,7 +117,6 @@ TEST_F(CPUFixture, ADDISX_CU_SetsZFlagWhenResultIsZero)
 
 TEST_F(CPUFixture, ADDRIX_PositiveImmediate)
 {
-    GTEST_SKIP() << "ADDRIX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(10, 50u); // rA
     execute(encodeADDRIX(12, 10, 10u, false));
     EXPECT_EQ(getReg(12), 60u);
@@ -137,7 +125,6 @@ TEST_F(CPUFixture, ADDRIX_PositiveImmediate)
 // imm14 = 0x3FFF = -1 when the 14-bit value is sign-extended
 TEST_F(CPUFixture, ADDRIX_NegativeImmediateSignExtended)
 {
-    GTEST_SKIP() << "ADDRIX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(10, 5u);
     // 14-bit -1 = 0x3FFF; sign-extended via (imm14 << 18) >> 18
     execute(encodeADDRIX(12, 10, 0x3FFFu, false));
@@ -146,7 +133,6 @@ TEST_F(CPUFixture, ADDRIX_NegativeImmediateSignExtended)
 
 TEST_F(CPUFixture, ADDRIX_CU_SetsZFlag)
 {
-    GTEST_SKIP() << "ADDRIX opcode not yet mapped — add opcode and dispatch to clock() first";
     setReg(10, 0u);
     execute(encodeADDRIX(12, 10, 0u, true));
     EXPECT_EQ(getReg(12), 0u);
