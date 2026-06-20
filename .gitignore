@@ -6,3 +6,6 @@
 # Built binaries
 src/main
 tests/test_runner
+
+# PPU render-test image artifacts
+tests/artifacts/
