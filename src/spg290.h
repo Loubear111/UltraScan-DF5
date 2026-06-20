@@ -1,6 +1,8 @@
 #pragma once
 
 #include <vector>
+#include <stdint.h>
+#include <string>
 
 class Bus;
 
@@ -95,8 +97,15 @@ private:
 	uint32_t	func3_MASK	= 0x1C0000;
 
 	/* OPCODES */
+	uint8_t ADDCX();
+	uint8_t ADDIX();
+	uint8_t ADDISX();
+	uint8_t ADDRIX();
 	uint8_t ANDX();		// Logical AND	
 	uint8_t ANDIX();	// Logical AND with Immediate
+	uint8_t ANDISX();
 	uint8_t ANDRIX();	// Logical AND Register with Immediate
-	uint8_t UNDEF();	// catches undefined opcodes
+	uint8_t BITTSTC();	
+	uint8_t CEINST();	
+	uint8_t ORX();	
 };
