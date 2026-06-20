@@ -19,8 +19,8 @@
 TEST_F(CPUFixture, LCB_LCW_ReconstructsUnalignedWord)
 {
     setReg(2, 201);                 // base byte address, off = 1, slot = 50
-    setReg(50, 0xAABBCCDDu);        // first aligned word
-    setReg(51, 0x11223344u);        // second aligned word
+    setMem(50,  0xAABBCCDDu);        // first aligned word
+    setMem(51,  0x11223344u);        // second aligned word
     execute(encodeLCB(2));          // LCR = mem[50]; rA -> 205
     execute(encodeLCW(3, 2));       // r3 = unaligned word; LCR = mem[51]; rA -> 209
     EXPECT_EQ(getReg(3), 0x44AABBCCu);
@@ -31,7 +31,7 @@ TEST_F(CPUFixture, LCB_LCW_ReconstructsUnalignedWord)
 TEST_F(CPUFixture, LCB_SetsLoadCombineRegister)
 {
     setReg(2, 200);                 // aligned
-    setReg(50, 0xDEADBEEFu);
+    setMem(50,  0xDEADBEEFu);
     execute(encodeLCB(2));
     EXPECT_EQ(bus.cpu.sr[1], 0xDEADBEEFu);
     EXPECT_EQ(getReg(2), 204u);
@@ -41,7 +41,7 @@ TEST_F(CPUFixture, LCB_SetsLoadCombineRegister)
 TEST_F(CPUFixture, LCE_AlignedReturnsLCR)
 {
     setReg(2, 200);                 // off = 0 throughout
-    setReg(50, 0xCAFEBABEu);
+    setMem(50,  0xCAFEBABEu);
     execute(encodeLCB(2));          // LCR = mem[50]; rA -> 204 (still aligned)
     execute(encodeLCE(3, 2));       // off==0 -> r3 = LCR, LCR unchanged
     EXPECT_EQ(getReg(3), 0xCAFEBABEu);
@@ -52,8 +52,8 @@ TEST_F(CPUFixture, LCE_AlignedReturnsLCR)
 TEST_F(CPUFixture, LCE_UnalignedCombines)
 {
     setReg(2, 201);
-    setReg(50, 0xAABBCCDDu);
-    setReg(51, 0x11223344u);
+    setMem(50,  0xAABBCCDDu);
+    setMem(51,  0x11223344u);
     execute(encodeLCB(2));
     execute(encodeLCE(3, 2));
     EXPECT_EQ(getReg(3), 0x44AABBCCu);
@@ -63,13 +63,13 @@ TEST_F(CPUFixture, LCE_UnalignedCombines)
 TEST_F(CPUFixture, SCB_SCE_StoreUnalignedWordPreservingNeighbors)
 {
     setReg(2, 201);                 // off = 1, slot = 50
-    setReg(50, 0x000000DDu);        // low byte (addr 200) must be preserved
-    setReg(51, 0x11000000u);        // high bytes (addr 205..207) must be preserved
+    setMem(50,  0x000000DDu);        // low byte (addr 200) must be preserved
+    setMem(51,  0x11000000u);        // high bytes (addr 205..207) must be preserved
     setReg(3, 0x44AABBCCu);         // value to store
     execute(encodeSCB(3, 2));       // writes slot 50 low part; SCR = value; rA -> 205
     execute(encodeSCE(2));          // writes slot 51 high part; rA -> 209
-    EXPECT_EQ(getReg(50), 0xAABBCCDDu);
-    EXPECT_EQ(getReg(51), 0x11000044u);
+    EXPECT_EQ(getMem(50), 0xAABBCCDDu);
+    EXPECT_EQ(getMem(51), 0x11000044u);
     EXPECT_EQ(bus.cpu.sr[2], 0x44AABBCCu);
     EXPECT_EQ(getReg(2), 209u);
 }
@@ -80,7 +80,7 @@ TEST_F(CPUFixture, SCB_AlignedStoresFullWord)
     setReg(3, 0xDEADBEEFu);
     execute(encodeSCB(3, 2));       // off==0 -> full word write; rA -> 204
     execute(encodeSCE(2));          // off==0 -> no write; rA -> 208
-    EXPECT_EQ(getReg(50), 0xDEADBEEFu);
+    EXPECT_EQ(getMem(50), 0xDEADBEEFu);
     EXPECT_EQ(getReg(2), 208u);
 }
 
@@ -90,9 +90,9 @@ TEST_F(CPUFixture, SCW_CombinesScrAndSource)
     setReg(2, 201);                 // off = 1, slot = 50
     bus.cpu.sr[2] = 0x44AABBCCu;    // SCR preset
     setReg(3, 0x8899AABBu);
-    setReg(50, 0);
+    setMem(50,  0);
     execute(encodeSCW(3, 2));
-    EXPECT_EQ(getReg(50), 0x99AABB44u);
+    EXPECT_EQ(getMem(50), 0x99AABB44u);
     EXPECT_EQ(bus.cpu.sr[2], 0x8899AABBu);   // SCR updated to source
     EXPECT_EQ(getReg(2), 205u);
 }
@@ -110,8 +110,8 @@ TEST_F(CPUFixture, StoreStream_ThenLoadStream_RoundTrips)
 
     // Store W0, W1 at byte offset 1 (slots 50,51,52) via scb/scw/sce.
     setReg(2, 201);
-    setReg(50, 0x000000AAu);        // preserved low byte at addr 200
-    setReg(52, 0xBBCCDD00u);        // preserved high bytes at addr 209..211
+    setMem(50,  0x000000AAu);        // preserved low byte at addr 200
+    setMem(52,  0xBBCCDD00u);        // preserved high bytes at addr 209..211
     setReg(3, W0);
     setReg(4, W1);
     step(encodeSCB(3, 2));          // slot 50

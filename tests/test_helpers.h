@@ -14,16 +14,16 @@ class CPUFixture : public ::testing::Test
 protected:
     Bus bus;
 
-    // Write a value into the RAM slot that acts as a register
+    // Write a value into the CPU general-purpose register file.
     void setReg(uint8_t reg, uint32_t val)
     {
-        bus.ram[reg] = val;
+        bus.cpu.regs[reg] = val;
     }
 
-    // Read back a register value
+    // Read a value from the CPU general-purpose register file.
     uint32_t getReg(uint8_t reg)
     {
-        return bus.ram[reg];
+        return bus.cpu.regs[reg];
     }
 
     // Place an instruction at the current PC and execute one clock cycle.
@@ -40,6 +40,68 @@ protected:
     {
         return bus.cpu.GetFlag(f);
     }
+
+    // Direct bus RAM access — use these for memory operands in load/store tests,
+    // not for CPU registers (which are in bus.cpu.regs[]).
+    void setMem(uint16_t addr, uint32_t val) { bus.ram[addr] = val; }
+    uint32_t getMem(uint16_t addr) const     { return bus.ram[addr]; }
+};
+
+// ============================================================
+// ROM protocol constants
+//
+// Test ROM programs must follow this two-word handshake at the
+// end of their sequence:
+//   1. Write PASS_VALUE or an error code to ROM_RESULT_ADDR.
+//   2. Write any non-zero value to ROM_DONE_ADDR.
+//
+// The addresses are placed near the top of the 64K address space
+// so they never collide with a short instruction sequence loaded
+// at address 0.
+// ============================================================
+static constexpr uint32_t ROM_DONE_ADDR   = 0xFF00u; // write non-zero when done
+static constexpr uint32_t ROM_RESULT_ADDR = 0xFF01u; // PASS_VALUE or error code
+static constexpr uint32_t PASS_VALUE      = 0xDEADu;
+
+
+// ============================================================
+// ROMFixture
+//
+// Runs a self-contained test ROM (a uint32_t instruction array)
+// to completion and exposes the pass/fail result.
+//
+// ROM contract (see ROM protocol constants above):
+//   - Instructions are loaded starting at address 0 (PC starts at 0).
+//   - CPU registers (r0-r31) are separate from RAM — no conflict.
+//   - ROM writes PASS_VALUE to ROM_RESULT_ADDR when all checks pass.
+//   - ROM writes a non-zero error code on failure.
+//   - ROM then writes any non-zero value to ROM_DONE_ADDR to signal done.
+//
+// Usage:
+//   static constexpr uint32_t prog[] = { encodeANDX(...), encodeSW(...), ... };
+//   runROM(prog, std::size(prog));
+//   EXPECT_TRUE(romPassed()) << "error code: " << romResult();
+// ============================================================
+class ROMFixture : public ::testing::Test
+{
+protected:
+    Bus bus;
+
+    // Load and run a ROM program. Clocks until ROM_DONE_ADDR is set or
+    // max_cycles is exhausted, whichever comes first.
+    void runROM(const uint32_t* prog, size_t len, uint32_t max_cycles = 100000)
+    {
+        bus.loadROM(prog, len);
+        for (uint32_t i = 0; i < max_cycles; ++i)
+        {
+            if (bus.ram[ROM_DONE_ADDR] != 0)
+                break;
+            bus.cpu.clock();
+        }
+    }
+
+    bool     romPassed() const { return bus.ram[ROM_RESULT_ADDR] == PASS_VALUE; }
+    uint32_t romResult() const { return bus.ram[ROM_RESULT_ADDR]; }
 };
 
 

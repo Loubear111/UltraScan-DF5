@@ -13,8 +13,12 @@ public:
 public: // Devices on bus
 	spg290 cpu;
 
-	// Fake RAM for testing of CPU -> Bus functionality
-	std::array<uint32_t, 1 * 1024> ram;
+	// 64 K words of RAM — matches the full 16-bit address space used by the
+	// bounds check in read()/write(), eliminating the previous buffer overflow.
+	std::array<uint32_t, 64 * 1024> ram;
+
+	// Copy `count` instruction words into ram[] starting at address 0.
+	void loadROM(const uint32_t* words, size_t count);
 
 public: // Bus Read and Write
 	void write(uint16_t addr, uint32_t data);

@@ -23,6 +23,12 @@ void spg290::write(uint16_t a, uint32_t d)
 	bus->write(a, d);
 }
 
+void spg290::writeReg(uint8_t r, uint32_t val)
+{
+	if (r != 0)
+		regs[r] = val;
+}
+
 // Returns the value of a specific bit of the status register
 uint8_t spg290::GetFlag(FLAGS290 f)
 {
@@ -203,8 +209,8 @@ uint8_t spg290::ADDCX()
 	b_reg = (instr & 0x7C00) >> 10;		// bits 14-10 (see s+core7 pg. 12)
 
     // Read values from registers
-    a = read(a_reg);
-    b = read(b_reg);
+    a = regs[a_reg];
+    b = regs[b_reg];
 
     // Retrieve current carry flag
     carry_in = GetFlag(C);
@@ -223,7 +229,7 @@ uint8_t spg290::ADDCX()
     }
 
     // Write result to destination register
-    write(d_reg, d);
+    writeReg(d_reg, d);
 
     return 1;  // Return cycle count or status
 }
@@ -242,7 +248,7 @@ uint8_t spg290::ADDIX()
     uint32_t sign_extended_imm = (uint32_t)imm;
 
     // Read the current value of the destination register
-    d_val = read(d_reg);
+    d_val = regs[d_reg];
 
     // Perform the addition
     d_val += sign_extended_imm;
@@ -257,7 +263,7 @@ uint8_t spg290::ADDIX()
     }
 
     // Write the result back to the destination register
-    write(d_reg, d_val);
+    writeReg(d_reg, d_val);
 
     return 1;
 }
@@ -275,7 +281,7 @@ uint8_t spg290::ADDISX()
     imm16 = (int16_t)((instr >> 1) & 0xFFFF);
 
     // Read the current value of register rD
-    d_val = read(d_reg);
+    d_val = regs[d_reg];
 
     // Calculate the 16-bit left-shifted immediate value
     uint32_t shifted_imm = (uint32_t)imm16 << 16;
@@ -293,7 +299,7 @@ uint8_t spg290::ADDISX()
     }
 
     // Write the result back to register rD
-    write(d_reg, d_val);
+    writeReg(d_reg, d_val);
 
     return 1;
 }
@@ -314,7 +320,7 @@ uint8_t spg290::ADDRIX()
     imm14 = (imm14 << 18) >> 18;
 
     // Read value from source register rA
-    a = read(a_reg);
+    a = regs[a_reg];
 
     // Perform addition: d = a + sign-extended imm14
     d = a + imm14;
@@ -327,7 +333,7 @@ uint8_t spg290::ADDRIX()
     }
 
     // Write the result to destination register rD
-    write(d_reg, d);
+    writeReg(d_reg, d);
 
     return 1;  // Execution completed successfully
 }
@@ -347,8 +353,8 @@ uint8_t spg290::ANDX()
 	b_reg = (instr & 0x7C00) >> 10;		// bits 14-10 (see s+core7 pg. 12)
 
 	// get the values stored in registers
-	a = read(a_reg);
-	b = read(b_reg);
+	a = regs[a_reg];
+	b = regs[b_reg];
 
 	// perform operation
 	d = a & b;
@@ -362,7 +368,7 @@ uint8_t spg290::ANDX()
 	}
 
 	// write back the result of the operation
-	write(d_reg, d);
+	writeReg(d_reg, d);
 
 	return 1;
 }
@@ -379,7 +385,7 @@ uint8_t spg290::ANDIX()
 	d_reg = (instr & 0x3E00000) >> 21;	// bits 25-21 (see s+core7 pg. 12)
 
 	// get the values stored in registers
-	d = read(d_reg);
+	d = regs[d_reg];
 
 	// Extract the immediate value from the instruction word
 	// we have to do the shifting/masking shenanigans because bit 15
@@ -397,7 +403,7 @@ uint8_t spg290::ANDIX()
 		SetFlag(N, (d >> 31) == 0);
 	}
 	// write back the result of the operation
-	write(d_reg, d);
+	writeReg(d_reg, d);
 
 	return 1;
 }
@@ -418,7 +424,7 @@ uint8_t spg290::ANDISX()
     imm_shifted = (uint32_t)imm16 << 16;
 
     // Read current value of rD (source operand)
-    a = read(d_reg);
+    a = regs[d_reg];
 
     // Perform the AND operation
     d = a & imm_shifted;
@@ -433,7 +439,7 @@ uint8_t spg290::ANDISX()
     }
 
     // Write the result back to rD
-    write(d_reg, d);
+    writeReg(d_reg, d);
 
     return 1;
 }
@@ -451,7 +457,7 @@ uint8_t spg290::ANDRIX()
 	a_reg = (instr & 0x1F0000) >> 16;	// bits 20-16 (see s+core7 pg. 12)
 	
 	// get the values stored in registers
-	a = read(a_reg);
+	a = regs[a_reg];
 
 	// Extract the immediate value from the instruction word
 	// here the immediate is 14-bits
@@ -468,7 +474,7 @@ uint8_t spg290::ANDRIX()
 		SetFlag(N, (d >> 31) == 0);
 	}
 	// write back the result of the operation
-	write(d_reg, d);
+	writeReg(d_reg, d);
 
 	return 1;
 }
@@ -484,7 +490,7 @@ uint8_t spg290::BITTSTC()
     bn = (instr & 0x7C00) >> 10;      // bits 14-10 (BN)
     
     // Read the value from register rA
-    a = read(a_reg);
+    a = regs[a_reg];
     
     // Compute the bit mask and test the bit
     uint32_t bit_mask = 1 << bn;
@@ -545,7 +551,7 @@ uint8_t spg290::CEINST() {
     //}
 
     // Write result to destination (could be USD1, USD2, or another reg)
-    write(dest_reg, result);
+    writeReg(dest_reg, result);
 
     // Conditionally update flags if CU_MASK is set (optional)
     if (instr & CU_MASK) {
@@ -572,8 +578,8 @@ uint8_t spg290::ORX()
     b_reg = (instr & 0x7C00) >> 10;    // bits 14-10
 
     // Read values from registers
-    a = read(a_reg);
-    b = read(b_reg);
+    a = regs[a_reg];
+    b = regs[b_reg];
 
     // Perform OR operation
     d = a | b;
@@ -586,7 +592,7 @@ uint8_t spg290::ORX()
     }
 
     // Write result to destination register
-    write(d_reg, d);
+    writeReg(d_reg, d);
 
     return 1;
 }
@@ -634,8 +640,8 @@ uint8_t spg290::ADDX()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
 
-    uint32_t a = read(a_reg);
-    uint32_t b = read(b_reg);
+    uint32_t a = regs[a_reg];
+    uint32_t b = regs[b_reg];
     uint64_t full = (uint64_t)a + (uint64_t)b;
     uint32_t r = (uint32_t)full;
 
@@ -647,7 +653,7 @@ uint8_t spg290::ADDX()
         SetFlag(V, ((~(a ^ b) & (a ^ r)) >> 31) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -657,8 +663,8 @@ uint8_t spg290::SUBX()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
 
-    uint32_t a = read(a_reg);
-    uint32_t b = read(b_reg);
+    uint32_t a = regs[a_reg];
+    uint32_t b = regs[b_reg];
     uint32_t r = a - b;
 
     if (instr & CU_MASK)
@@ -669,7 +675,7 @@ uint8_t spg290::SUBX()
         SetFlag(V, (((a ^ b) & (a ^ r)) >> 31) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -679,8 +685,8 @@ uint8_t spg290::SUBCX()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
 
-    uint32_t a = read(a_reg);
-    uint32_t b = read(b_reg);
+    uint32_t a = regs[a_reg];
+    uint32_t b = regs[b_reg];
     uint8_t  cin = GetFlag(C);
     // GPRrD = GPRrA - GPRrB - (~C)  where (~C) is the 1-bit complement of C
     uint64_t sub = (uint64_t)b + (uint64_t)(1 - cin);
@@ -694,7 +700,7 @@ uint8_t spg290::SUBCX()
         SetFlag(V, (((a ^ b) & (a ^ r)) >> 31) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -703,7 +709,7 @@ uint8_t spg290::NEGX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t b_reg = (instr & 0x7C00) >> 10;   // neg rD, rB
 
-    uint32_t b = read(b_reg);
+    uint32_t b = regs[b_reg];
     uint32_t r = 0u - b;
 
     if (instr & CU_MASK)
@@ -714,7 +720,7 @@ uint8_t spg290::NEGX()
         SetFlag(V, b == 0x80000000u);        // overflow only for INT_MIN
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -723,7 +729,7 @@ uint8_t spg290::NOTX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
 
-    uint32_t r = ~read(a_reg);
+    uint32_t r = ~regs[a_reg];
 
     if (instr & CU_MASK)
     {
@@ -731,7 +737,7 @@ uint8_t spg290::NOTX()
         SetFlag(Z, r == 0);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -746,7 +752,7 @@ uint8_t spg290::XORX()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
 
-    uint32_t r = read(a_reg) ^ read(b_reg);
+    uint32_t r = regs[a_reg] ^ regs[b_reg];
 
     if (instr & CU_MASK)
     {
@@ -754,7 +760,7 @@ uint8_t spg290::XORX()
         SetFlag(Z, r == 0);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -766,8 +772,8 @@ uint8_t spg290::CMP()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
 
-    uint32_t a = read(a_reg);
-    uint32_t b = read(b_reg);
+    uint32_t a = regs[a_reg];
+    uint32_t b = regs[b_reg];
     uint32_t r = a - b;
 
     SetFlag(N, (r >> 31) & 1);
@@ -786,7 +792,7 @@ uint8_t spg290::CMPZ()
     uint8_t tcs   = (instr >> 21) & 0x3;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
 
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
 
     SetFlag(N, (a >> 31) & 1);
     SetFlag(Z, a == 0);
@@ -806,7 +812,7 @@ uint8_t spg290::MVCOND()
     uint8_t ec    = (instr >> 10) & 0xF;   // EC occupies low 4 bits of the rB field
 
     if (evalCondition(ec))
-        write(d_reg, read(a_reg));
+        writeReg(d_reg, regs[a_reg]);
 
     return 1;
 }
@@ -815,7 +821,7 @@ uint8_t spg290::ORIX()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
     uint32_t imm16 = (instr >> 1) & 0xFFFF;        // zero-extended
-    uint32_t r = read(d_reg) | imm16;
+    uint32_t r = regs[d_reg] | imm16;
 
     if (instr & CU_MASK)
     {
@@ -823,7 +829,7 @@ uint8_t spg290::ORIX()
         SetFlag(Z, r == 0);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -831,7 +837,7 @@ uint8_t spg290::ORISX()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
     uint32_t imm16 = (instr >> 1) & 0xFFFF;
-    uint32_t r = read(d_reg) | (imm16 << 16);
+    uint32_t r = regs[d_reg] | (imm16 << 16);
 
     if (instr & CU_MASK)
     {
@@ -839,7 +845,7 @@ uint8_t spg290::ORISX()
         SetFlag(Z, r == 0);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -848,7 +854,7 @@ uint8_t spg290::ORRIX()
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
     uint8_t  a_reg = (instr & 0x1F0000) >> 16;
     uint32_t imm14 = (instr >> 1) & 0x3FFF;        // zero-extended
-    uint32_t r = read(a_reg) | imm14;
+    uint32_t r = regs[a_reg] | imm14;
 
     if (instr & CU_MASK)
     {
@@ -856,7 +862,7 @@ uint8_t spg290::ORRIX()
         SetFlag(Z, r == 0);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -864,7 +870,7 @@ uint8_t spg290::SUBIX()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
     int32_t  imm   = (int16_t)((instr >> 1) & 0xFFFF);   // sign-extended
-    uint32_t a = read(d_reg);
+    uint32_t a = regs[d_reg];
     uint32_t b = (uint32_t)imm;
     uint32_t r = a - b;
 
@@ -876,7 +882,7 @@ uint8_t spg290::SUBIX()
         SetFlag(V, (((a ^ b) & (a ^ r)) >> 31) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -884,7 +890,7 @@ uint8_t spg290::SUBISX()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
     int32_t  imm   = (int16_t)((instr >> 1) & 0xFFFF);
-    uint32_t a = read(d_reg);
+    uint32_t a = regs[d_reg];
     uint32_t b = ((uint32_t)imm) << 16;
     uint32_t r = a - b;
 
@@ -896,7 +902,7 @@ uint8_t spg290::SUBISX()
         SetFlag(V, (((a ^ b) & (a ^ r)) >> 31) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -906,7 +912,7 @@ uint8_t spg290::SUBRIX()
     uint8_t  a_reg = (instr & 0x1F0000) >> 16;
     int32_t  imm14 = (instr >> 1) & 0x3FFF;
     imm14 = (imm14 << 18) >> 18;                 // sign-extend 14-bit
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
     uint32_t b = (uint32_t)imm14;
     uint32_t r = a - b;
 
@@ -918,7 +924,7 @@ uint8_t spg290::SUBRIX()
         SetFlag(V, (((a ^ b) & (a ^ r)) >> 31) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -926,7 +932,7 @@ uint8_t spg290::CMPI()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
     int32_t  imm   = (int16_t)((instr >> 1) & 0xFFFF);
-    uint32_t a = read(d_reg);
+    uint32_t a = regs[d_reg];
     uint32_t b = (uint32_t)imm;
     uint32_t r = a - b;
 
@@ -943,7 +949,7 @@ uint8_t spg290::LDI()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     int32_t imm   = (int16_t)((instr >> 1) & 0xFFFF);  // sign-extended
-    write(d_reg, (uint32_t)imm);
+    writeReg(d_reg, (uint32_t)imm);
     return 1;
 }
 
@@ -951,7 +957,7 @@ uint8_t spg290::LDIS()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
     uint32_t imm16 = (instr >> 1) & 0xFFFF;
-    write(d_reg, imm16 << 16);
+    writeReg(d_reg, imm16 << 16);
     return 1;
 }
 
@@ -962,8 +968,8 @@ uint8_t spg290::SLLX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
-    uint8_t  sa = read(b_reg) & 0x1F;
+    uint32_t a = regs[a_reg];
+    uint8_t  sa = regs[b_reg] & 0x1F;
     uint32_t r = (sa == 0) ? a : (a << sa);
 
     if (instr & CU_MASK)
@@ -973,7 +979,7 @@ uint8_t spg290::SLLX()
         SetFlag(C, sa == 0 ? false : ((a >> (32 - sa)) & 1));
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -982,8 +988,8 @@ uint8_t spg290::SRLX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
-    uint8_t  sa = read(b_reg) & 0x1F;
+    uint32_t a = regs[a_reg];
+    uint8_t  sa = regs[b_reg] & 0x1F;
     uint32_t r = (sa == 0) ? a : (a >> sa);
 
     if (instr & CU_MASK)
@@ -993,7 +999,7 @@ uint8_t spg290::SRLX()
         SetFlag(C, sa == 0 ? false : ((a >> (sa - 1)) & 1));
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1002,8 +1008,8 @@ uint8_t spg290::SRAX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
-    uint8_t  sa = read(b_reg) & 0x1F;
+    uint32_t a = regs[a_reg];
+    uint8_t  sa = regs[b_reg] & 0x1F;
     uint32_t r = (sa == 0) ? a : (uint32_t)((int32_t)a >> sa);
 
     if (instr & CU_MASK)
@@ -1013,7 +1019,7 @@ uint8_t spg290::SRAX()
         SetFlag(C, sa == 0 ? false : ((a >> (sa - 1)) & 1));
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1022,8 +1028,8 @@ uint8_t spg290::ROLX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
-    uint8_t  sa = read(b_reg) & 0x1F;
+    uint32_t a = regs[a_reg];
+    uint8_t  sa = regs[b_reg] & 0x1F;
     uint32_t r = (sa == 0) ? a : ((a << sa) | (a >> (32 - sa)));
 
     if (instr & CU_MASK)
@@ -1032,7 +1038,7 @@ uint8_t spg290::ROLX()
         if (sa != 0) SetFlag(C, (a >> (32 - sa)) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1041,8 +1047,8 @@ uint8_t spg290::RORX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
-    uint8_t  sa = read(b_reg) & 0x1F;
+    uint32_t a = regs[a_reg];
+    uint8_t  sa = regs[b_reg] & 0x1F;
     uint32_t r = (sa == 0) ? a : ((a >> sa) | (a << (32 - sa)));
 
     if (instr & CU_MASK)
@@ -1051,7 +1057,7 @@ uint8_t spg290::RORX()
         if (sa != 0) SetFlag(C, (a >> (sa - 1)) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1060,7 +1066,7 @@ uint8_t spg290::SLLIX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t sa    = (instr & 0x7C00) >> 10;   // 5-bit shift amount
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
     uint32_t r = (sa == 0) ? a : (a << sa);
 
     if (instr & CU_MASK)
@@ -1070,7 +1076,7 @@ uint8_t spg290::SLLIX()
         SetFlag(C, sa == 0 ? false : ((a >> (32 - sa)) & 1));
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1079,7 +1085,7 @@ uint8_t spg290::SRLIX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t sa    = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
     uint32_t r = (sa == 0) ? a : (a >> sa);
 
     if (instr & CU_MASK)
@@ -1089,7 +1095,7 @@ uint8_t spg290::SRLIX()
         SetFlag(C, sa == 0 ? false : ((a >> (sa - 1)) & 1));
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1098,7 +1104,7 @@ uint8_t spg290::SRAIX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t sa    = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
     uint32_t r = (sa == 0) ? a : (uint32_t)((int32_t)a >> sa);
 
     if (instr & CU_MASK)
@@ -1108,7 +1114,7 @@ uint8_t spg290::SRAIX()
         SetFlag(C, sa == 0 ? false : ((a >> (sa - 1)) & 1));
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1117,7 +1123,7 @@ uint8_t spg290::ROLIX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t sa    = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
     uint32_t r = (sa == 0) ? a : ((a << sa) | (a >> (32 - sa)));
 
     if (instr & CU_MASK)
@@ -1126,7 +1132,7 @@ uint8_t spg290::ROLIX()
         if (sa != 0) SetFlag(C, (a >> (32 - sa)) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1135,7 +1141,7 @@ uint8_t spg290::RORIX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t sa    = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
     uint32_t r = (sa == 0) ? a : ((a >> sa) | (a << (32 - sa)));
 
     if (instr & CU_MASK)
@@ -1144,7 +1150,7 @@ uint8_t spg290::RORIX()
         if (sa != 0) SetFlag(C, (a >> (sa - 1)) & 1);
     }
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1154,12 +1160,12 @@ uint8_t spg290::EXTSBX()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint32_t r = (uint32_t)(int32_t)(int8_t)(read(a_reg) & 0xFF);
+    uint32_t r = (uint32_t)(int32_t)(int8_t)(regs[a_reg] & 0xFF);
 
     if (instr & CU_MASK)
         SetFlag(N, (r >> 31) & 1);   // Z is undefined per spec
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1167,12 +1173,12 @@ uint8_t spg290::EXTSHX()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint32_t r = (uint32_t)(int32_t)(int16_t)(read(a_reg) & 0xFFFF);
+    uint32_t r = (uint32_t)(int32_t)(int16_t)(regs[a_reg] & 0xFFFF);
 
     if (instr & CU_MASK)
         SetFlag(N, (r >> 31) & 1);
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1180,12 +1186,12 @@ uint8_t spg290::EXTZBX()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint32_t r = read(a_reg) & 0xFF;
+    uint32_t r = regs[a_reg] & 0xFF;
 
     if (instr & CU_MASK)
         SetFlag(N, (r >> 31) & 1);
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1193,12 +1199,12 @@ uint8_t spg290::EXTZHX()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint32_t r = read(a_reg) & 0xFFFF;
+    uint32_t r = regs[a_reg] & 0xFFFF;
 
     if (instr & CU_MASK)
         SetFlag(N, (r >> 31) & 1);
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1206,9 +1212,9 @@ uint8_t spg290::CLZ()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
     uint32_t r = (a == 0) ? 32u : (uint32_t)__builtin_clz(a);
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1216,10 +1222,10 @@ uint8_t spg290::ABS()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint32_t av = read(a_reg);
+    uint32_t av = regs[a_reg];
     // Use unsigned negation to avoid signed overflow UB on INT_MIN.
     uint32_t r = ((int32_t)av >= 0) ? av : (0u - av);
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1228,9 +1234,9 @@ uint8_t spg290::MIN()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int32_t a = (int32_t)read(a_reg);
-    int32_t b = (int32_t)read(b_reg);
-    write(d_reg, (uint32_t)(a <= b ? a : b));
+    int32_t a = (int32_t)regs[a_reg];
+    int32_t b = (int32_t)regs[b_reg];
+    writeReg(d_reg, (uint32_t)(a <= b ? a : b));
     return 1;
 }
 
@@ -1239,9 +1245,9 @@ uint8_t spg290::MAX()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int32_t a = (int32_t)read(a_reg);
-    int32_t b = (int32_t)read(b_reg);
-    write(d_reg, (uint32_t)(a >= b ? a : b));
+    int32_t a = (int32_t)regs[a_reg];
+    int32_t b = (int32_t)regs[b_reg];
+    writeReg(d_reg, (uint32_t)(a >= b ? a : b));
     return 1;
 }
 
@@ -1251,9 +1257,9 @@ uint8_t spg290::BITREV()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
 
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
     // Shift amount: 0 if rB is r0, else low 5 bits of rB.
-    uint8_t sa = (b_reg == 0) ? 0 : (read(b_reg) & 0x1F);
+    uint8_t sa = (b_reg == 0) ? 0 : (regs[b_reg] & 0x1F);
 
     // Reverse all 32 bits of rA.
     uint32_t rev = 0;
@@ -1261,7 +1267,7 @@ uint8_t spg290::BITREV()
         rev |= ((a >> i) & 1u) << (31 - i);
 
     uint32_t r = (sa == 0) ? rev : (rev >> sa);
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1271,7 +1277,7 @@ uint8_t spg290::MUL()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t prod = (int64_t)(int32_t)read(a_reg) * (int64_t)(int32_t)read(b_reg);
+    int64_t prod = (int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg];
     cel = (uint32_t)(prod & 0xFFFFFFFF);
     ceh = (uint32_t)((uint64_t)prod >> 32);
     return 1;
@@ -1281,7 +1287,7 @@ uint8_t spg290::MULU()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint64_t prod = (uint64_t)read(a_reg) * (uint64_t)read(b_reg);
+    uint64_t prod = (uint64_t)regs[a_reg] * (uint64_t)regs[b_reg];
     cel = (uint32_t)(prod & 0xFFFFFFFF);
     ceh = (uint32_t)(prod >> 32);
     return 1;
@@ -1291,8 +1297,8 @@ uint8_t spg290::DIV()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int32_t a = (int32_t)read(a_reg);
-    int32_t b = (int32_t)read(b_reg);
+    int32_t a = (int32_t)regs[a_reg];
+    int32_t b = (int32_t)regs[b_reg];
     if (b != 0)
     {
         cel = (uint32_t)(a / b);   // quotient
@@ -1305,8 +1311,8 @@ uint8_t spg290::DIVU()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
-    uint32_t b = read(b_reg);
+    uint32_t a = regs[a_reg];
+    uint32_t b = regs[b_reg];
     if (b != 0)
     {
         cel = a / b;
@@ -1320,14 +1326,14 @@ uint8_t spg290::REM()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int32_t a = (int32_t)read(a_reg);
-    int32_t b = (int32_t)read(b_reg);
+    int32_t a = (int32_t)regs[a_reg];
+    int32_t b = (int32_t)regs[b_reg];
     if (b != 0)
     {
         cel = (uint32_t)(a / b);
         ceh = (uint32_t)(a % b);
     }
-    write(d_reg, ceh);   // rem == div then mfceh
+    writeReg(d_reg, ceh);   // rem == div then mfceh
     return 1;
 }
 
@@ -1336,42 +1342,42 @@ uint8_t spg290::REMU()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
-    uint32_t b = read(b_reg);
+    uint32_t a = regs[a_reg];
+    uint32_t b = regs[b_reg];
     if (b != 0)
     {
         cel = a / b;
         ceh = a % b;
     }
-    write(d_reg, ceh);
+    writeReg(d_reg, ceh);
     return 1;
 }
 
 uint8_t spg290::MFCEL()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;   // destination GPR
-    write(d_reg, cel);
+    writeReg(d_reg, cel);
     return 1;
 }
 
 uint8_t spg290::MFCEH()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    write(d_reg, ceh);
+    writeReg(d_reg, ceh);
     return 1;
 }
 
 uint8_t spg290::MTCEL()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;    // source GPR
-    cel = read(a_reg);
+    cel = regs[a_reg];
     return 1;
 }
 
 uint8_t spg290::MTCEH()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    ceh = read(a_reg);
+    ceh = regs[a_reg];
     return 1;
 }
 
@@ -1387,7 +1393,7 @@ uint8_t spg290::MAD()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t prod = (int64_t)(int32_t)read(a_reg) * (int64_t)(int32_t)read(b_reg);
+    int64_t prod = (int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg];
     uint64_t acc = packCE(ceh, cel) + (uint64_t)prod;
     cel = (uint32_t)(acc & 0xFFFFFFFF);
     ceh = (uint32_t)(acc >> 32);
@@ -1398,7 +1404,7 @@ uint8_t spg290::MADU()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint64_t prod = (uint64_t)read(a_reg) * (uint64_t)read(b_reg);
+    uint64_t prod = (uint64_t)regs[a_reg] * (uint64_t)regs[b_reg];
     uint64_t acc = packCE(ceh, cel) + prod;
     cel = (uint32_t)(acc & 0xFFFFFFFF);
     ceh = (uint32_t)(acc >> 32);
@@ -1409,7 +1415,7 @@ uint8_t spg290::MSB()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t prod = (int64_t)(int32_t)read(a_reg) * (int64_t)(int32_t)read(b_reg);
+    int64_t prod = (int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg];
     uint64_t acc = packCE(ceh, cel) - (uint64_t)prod;
     cel = (uint32_t)(acc & 0xFFFFFFFF);
     ceh = (uint32_t)(acc >> 32);
@@ -1420,7 +1426,7 @@ uint8_t spg290::MSBU()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint64_t prod = (uint64_t)read(a_reg) * (uint64_t)read(b_reg);
+    uint64_t prod = (uint64_t)regs[a_reg] * (uint64_t)regs[b_reg];
     uint64_t acc = packCE(ceh, cel) - prod;
     cel = (uint32_t)(acc & 0xFFFFFFFF);
     ceh = (uint32_t)(acc >> 32);
@@ -1432,7 +1438,7 @@ uint8_t spg290::MULF()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
     // Signed-fractional: the Q31*Q31 product is left-shifted by 1.
-    int64_t prod = ((int64_t)(int32_t)read(a_reg) * (int64_t)(int32_t)read(b_reg)) << 1;
+    int64_t prod = ((int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg]) << 1;
     cel = (uint32_t)((uint64_t)prod & 0xFFFFFFFF);
     ceh = (uint32_t)((uint64_t)prod >> 32);
     return 1;
@@ -1442,7 +1448,7 @@ uint8_t spg290::MADF()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t prod = ((int64_t)(int32_t)read(a_reg) * (int64_t)(int32_t)read(b_reg)) << 1;
+    int64_t prod = ((int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg]) << 1;
     uint64_t acc = packCE(ceh, cel) + (uint64_t)prod;
     cel = (uint32_t)(acc & 0xFFFFFFFF);
     ceh = (uint32_t)(acc >> 32);
@@ -1460,8 +1466,8 @@ uint8_t spg290::LW()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;                       // sign-extend 15-bit
-    uint16_t addr = (uint16_t)(read(a_reg) + (uint32_t)imm);
-    write(d_reg, read(addr));
+    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
+    writeReg(d_reg, read(addr));
     return 1;
 }
 
@@ -1471,8 +1477,8 @@ uint8_t spg290::SW()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(read(a_reg) + (uint32_t)imm);
-    write(addr, read(d_reg));
+    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
+    write(addr, regs[d_reg]);
     return 1;
 }
 
@@ -1482,8 +1488,8 @@ uint8_t spg290::LBU()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(read(a_reg) + (uint32_t)imm);
-    write(d_reg, read(addr) & 0xFF);
+    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
+    writeReg(d_reg, read(addr) & 0xFF);
     return 1;
 }
 
@@ -1493,8 +1499,8 @@ uint8_t spg290::LB()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(read(a_reg) + (uint32_t)imm);
-    write(d_reg, (uint32_t)(int32_t)(int8_t)(read(addr) & 0xFF));
+    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
+    writeReg(d_reg, (uint32_t)(int32_t)(int8_t)(read(addr) & 0xFF));
     return 1;
 }
 
@@ -1504,8 +1510,8 @@ uint8_t spg290::LHU()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(read(a_reg) + (uint32_t)imm);
-    write(d_reg, read(addr) & 0xFFFF);
+    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
+    writeReg(d_reg, read(addr) & 0xFFFF);
     return 1;
 }
 
@@ -1515,8 +1521,8 @@ uint8_t spg290::LH()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(read(a_reg) + (uint32_t)imm);
-    write(d_reg, (uint32_t)(int32_t)(int16_t)(read(addr) & 0xFFFF));
+    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
+    writeReg(d_reg, (uint32_t)(int32_t)(int16_t)(read(addr) & 0xFFFF));
     return 1;
 }
 
@@ -1526,8 +1532,8 @@ uint8_t spg290::SB()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(read(a_reg) + (uint32_t)imm);
-    uint32_t word = (read(addr) & ~0xFFu) | (read(d_reg) & 0xFFu);
+    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
+    uint32_t word = (read(addr) & ~0xFFu) | (regs[d_reg] & 0xFFu);
     write(addr, word);
     return 1;
 }
@@ -1538,8 +1544,8 @@ uint8_t spg290::SH()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(read(a_reg) + (uint32_t)imm);
-    uint32_t word = (read(addr) & ~0xFFFFu) | (read(d_reg) & 0xFFFFu);
+    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
+    uint32_t word = (read(addr) & ~0xFFFFu) | (regs[d_reg] & 0xFFFFu);
     write(addr, word);
     return 1;
 }
@@ -1566,7 +1572,7 @@ uint8_t spg290::JX()
     uint8_t  lk   = instr & 0x1;
 
     if (lk)
-        write(3, pc);     // link register r3 = address of following instruction
+        writeReg(3, pc);     // link register r3 = address of following instruction
 
     pc = disp;
     return 1;
@@ -1578,7 +1584,7 @@ uint8_t spg290::BR()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
 
     if (evalCondition(bc))
-        pc = read(a_reg);
+        pc = regs[a_reg];
 
     return 1;
 }
@@ -1591,7 +1597,7 @@ uint8_t spg290::BCONDL()
 
     // Link register r3 = address of the following instruction (pc already
     // advanced). The link is always written, regardless of the condition.
-    write(3, pc);
+    writeReg(3, pc);
 
     if (evalCondition(bc))
         pc = (pc - 1) + (uint32_t)disp;
@@ -1604,10 +1610,10 @@ uint8_t spg290::BRL()
     uint8_t bc    = (instr >> 22) & 0xF;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
 
-    write(3, pc);   // link unconditionally
+    writeReg(3, pc);   // link unconditionally
 
     if (evalCondition(bc))
-        pc = read(a_reg);
+        pc = regs[a_reg];
 
     return 1;
 }
@@ -1649,8 +1655,8 @@ uint8_t spg290::ROLC()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
-    uint8_t  sa = read(b_reg) & 0x1F;
+    uint32_t a = regs[a_reg];
+    uint8_t  sa = regs[b_reg] & 0x1F;
 
     uint32_t r; bool c; bool cChanged;
     rotcRun(a, sa, GetFlag(C), true, r, c, cChanged);
@@ -1658,7 +1664,7 @@ uint8_t spg290::ROLC()
     SetFlag(N, (r >> 31) & 1);
     if (cChanged) SetFlag(C, c);
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1667,7 +1673,7 @@ uint8_t spg290::ROLIC()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t sa    = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
 
     uint32_t r; bool c; bool cChanged;
     rotcRun(a, sa, GetFlag(C), true, r, c, cChanged);
@@ -1675,7 +1681,7 @@ uint8_t spg290::ROLIC()
     SetFlag(N, (r >> 31) & 1);
     if (cChanged) SetFlag(C, c);
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1684,8 +1690,8 @@ uint8_t spg290::RORC()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
-    uint8_t  sa = read(b_reg) & 0x1F;
+    uint32_t a = regs[a_reg];
+    uint8_t  sa = regs[b_reg] & 0x1F;
 
     uint32_t r; bool c; bool cChanged;
     rotcRun(a, sa, GetFlag(C), false, r, c, cChanged);
@@ -1693,7 +1699,7 @@ uint8_t spg290::RORC()
     SetFlag(N, (r >> 31) & 1);
     if (cChanged) SetFlag(C, c);
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1702,7 +1708,7 @@ uint8_t spg290::RORIC()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t sa    = (instr & 0x7C00) >> 10;
-    uint32_t a = read(a_reg);
+    uint32_t a = regs[a_reg];
 
     uint32_t r; bool c; bool cChanged;
     rotcRun(a, sa, GetFlag(C), false, r, c, cChanged);
@@ -1710,7 +1716,7 @@ uint8_t spg290::RORIC()
     SetFlag(N, (r >> 31) & 1);
     if (cChanged) SetFlag(C, c);
 
-    write(d_reg, r);
+    writeReg(d_reg, r);
     return 1;
 }
 
@@ -1730,8 +1736,8 @@ uint8_t spg290::ADDS()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t sum = (int64_t)(int32_t)read(a_reg) + (int64_t)(int32_t)read(b_reg);
-    write(d_reg, satFromI64(sum));
+    int64_t sum = (int64_t)(int32_t)regs[a_reg] + (int64_t)(int32_t)regs[b_reg];
+    writeReg(d_reg, satFromI64(sum));
     return 1;
 }
 
@@ -1740,8 +1746,8 @@ uint8_t spg290::SUBS()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t diff = (int64_t)(int32_t)read(a_reg) - (int64_t)(int32_t)read(b_reg);
-    write(d_reg, satFromI64(diff));
+    int64_t diff = (int64_t)(int32_t)regs[a_reg] - (int64_t)(int32_t)regs[b_reg];
+    writeReg(d_reg, satFromI64(diff));
     return 1;
 }
 
@@ -1749,9 +1755,9 @@ uint8_t spg290::ABSS()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int64_t a = (int64_t)(int32_t)read(a_reg);
+    int64_t a = (int64_t)(int32_t)regs[a_reg];
     int64_t r = (a >= 0) ? a : -a;       // -INT32_MIN clamps to INT32_MAX below
-    write(d_reg, satFromI64(r));
+    writeReg(d_reg, satFromI64(r));
     return 1;
 }
 
@@ -1760,10 +1766,10 @@ uint8_t spg290::SLLS()
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t a = (int64_t)(int32_t)read(a_reg);
-    uint8_t sa = read(b_reg) & 0x1F;
+    int64_t a = (int64_t)(int32_t)regs[a_reg];
+    uint8_t sa = regs[b_reg] & 0x1F;
     int64_t shifted = a << sa;            // widen first, then clamp
-    write(d_reg, satFromI64(shifted));
+    writeReg(d_reg, satFromI64(shifted));
     return 1;
 }
 
@@ -1773,7 +1779,7 @@ uint8_t spg290::MSBF()
 {
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t prod = ((int64_t)(int32_t)read(a_reg) * (int64_t)(int32_t)read(b_reg)) << 1;
+    int64_t prod = ((int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg]) << 1;
     uint64_t acc = packCE(ceh, cel) - (uint64_t)prod;
     cel = (uint32_t)(acc & 0xFFFFFFFF);
     ceh = (uint32_t)(acc >> 32);
@@ -1801,8 +1807,8 @@ uint8_t spg290::HWMAC()
     bool S = sel & 0x02;
     bool U = sel & 0x01;
 
-    uint32_t va = read(a_reg);
-    uint32_t vb = read(b_reg);
+    uint32_t va = regs[a_reg];
+    uint32_t vb = regs[b_reg];
     uint32_t halfA = H ? (va >> 16) : (va & 0xFFFF);
     uint32_t halfB = H ? (vb >> 16) : (vb & 0xFFFF);
 
@@ -1842,40 +1848,40 @@ uint8_t spg290::LSU_UPD()
     imm = (imm << 20) >> 20;                      // sign-extend
     bool    pre   = instr & 0x1;
 
-    uint32_t base = read(a_reg);
+    uint32_t base = regs[a_reg];
     uint16_t addr = (uint16_t)(pre ? (base + (uint32_t)imm) : base);
 
     switch (sub)
     {
     case 0: // lw
-        write(d_reg, read(addr));
+        writeReg(d_reg, read(addr));
         break;
     case 1: // sw
-        write(addr, read(d_reg));
+        write(addr, regs[d_reg]);
         break;
     case 2: // lbu
-        write(d_reg, read(addr) & 0xFF);
+        writeReg(d_reg, read(addr) & 0xFF);
         break;
     case 3: // lb
-        write(d_reg, (uint32_t)(int32_t)(int8_t)(read(addr) & 0xFF));
+        writeReg(d_reg, (uint32_t)(int32_t)(int8_t)(read(addr) & 0xFF));
         break;
     case 4: // lhu
-        write(d_reg, read(addr) & 0xFFFF);
+        writeReg(d_reg, read(addr) & 0xFFFF);
         break;
     case 5: // lh
-        write(d_reg, (uint32_t)(int32_t)(int16_t)(read(addr) & 0xFFFF));
+        writeReg(d_reg, (uint32_t)(int32_t)(int16_t)(read(addr) & 0xFFFF));
         break;
     case 6: // sb
-        write(addr, (read(addr) & ~0xFFu) | (read(d_reg) & 0xFFu));
+        write(addr, (read(addr) & ~0xFFu) | (regs[d_reg] & 0xFFu));
         break;
     case 7: // sh
-        write(addr, (read(addr) & ~0xFFFFu) | (read(d_reg) & 0xFFFFu));
+        write(addr, (read(addr) & ~0xFFFFu) | (regs[d_reg] & 0xFFFFu));
         break;
     }
 
     // Base register writeback happens last so that, when rD == rA on a load,
     // the writeback value wins (matching the spec's sequential semantics).
-    write(a_reg, base + (uint32_t)imm);
+    writeReg(a_reg, base + (uint32_t)imm);
     return 1;
 }
 
@@ -1901,19 +1907,19 @@ uint8_t spg290::decode16()
         uint8_t func = (w >> 8) & 0xF;
         uint8_t d    = (w >> 4) & 0xF;
         uint8_t a    = w & 0xF;
-        uint32_t vd = read(d);
-        uint32_t va = read(a);
+        uint32_t vd = regs[d];
+        uint32_t va = regs[a];
         switch (func)
         {
-        case 0:  write(d, vd + va);                 break; // add!
-        case 1:  write(d, vd + va + GetFlag(C));    break; // addc!
-        case 2:  write(d, vd - va);                 break; // sub!
-        case 3:  write(d, vd & va);                 break; // and!
-        case 4:  write(d, vd | va);                 break; // or!
-        case 5:  write(d, vd ^ va);                 break; // xor!
-        case 6:  write(d, va);                      break; // mv!
-        case 7:  write(d, 0u - va);                 break; // neg!
-        case 8:  write(d, ~va);                     break; // not!
+        case 0:  writeReg(d, vd + va);                 break; // add!
+        case 1:  writeReg(d, vd + va + GetFlag(C));    break; // addc!
+        case 2:  writeReg(d, vd - va);                 break; // sub!
+        case 3:  writeReg(d, vd & va);                 break; // and!
+        case 4:  writeReg(d, vd | va);                 break; // or!
+        case 5:  writeReg(d, vd ^ va);                 break; // xor!
+        case 6:  writeReg(d, va);                      break; // mv!
+        case 7:  writeReg(d, 0u - va);                 break; // neg!
+        case 8:  writeReg(d, ~va);                     break; // not!
         case 9: // cmp! : updates N/Z/C/V
         {
             uint32_t r = vd - va;
@@ -1923,9 +1929,9 @@ uint8_t spg290::decode16()
             SetFlag(V, (((vd ^ va) & (vd ^ r)) >> 31) & 1);
             break;
         }
-        case 10: { uint8_t s = va & 0x1F; write(d, s ? (vd << s) : vd); break; }                 // sll!
-        case 11: { uint8_t s = va & 0x1F; write(d, s ? (vd >> s) : vd); break; }                 // srl!
-        case 12: { uint8_t s = va & 0x1F; write(d, s ? (uint32_t)((int32_t)vd >> s) : vd); break; } // sra!
+        case 10: { uint8_t s = va & 0x1F; writeReg(d, s ? (vd << s) : vd); break; }                 // sll!
+        case 11: { uint8_t s = va & 0x1F; writeReg(d, s ? (vd >> s) : vd); break; }                 // srl!
+        case 12: { uint8_t s = va & 0x1F; writeReg(d, s ? (uint32_t)((int32_t)vd >> s) : vd); break; } // sra!
         default: break;
         }
         break;
@@ -1933,7 +1939,7 @@ uint8_t spg290::decode16()
     case 0x1: // ldiu! : rD[11:8] Imm8[7:0]
     {
         uint8_t d = (w >> 8) & 0xF;
-        write(d, (uint32_t)(w & 0xFF));
+        writeReg(d, (uint32_t)(w & 0xFF));
         break;
     }
     case 0x2: // R-Imm : func2[11:10] rD[9:6] Imm[5:0]
@@ -1942,13 +1948,13 @@ uint8_t spg290::decode16()
         uint8_t d    = (w >> 6) & 0xF;
         uint8_t imm5 = w & 0x1F;
         uint8_t imm4 = w & 0xF;
-        uint32_t vd  = read(d);
+        uint32_t vd  = regs[d];
         switch (func)
         {
-        case 0: write(d, imm5 ? (vd << imm5) : vd);                 break; // slli!
-        case 1: write(d, imm5 ? (vd >> imm5) : vd);                 break; // srli!
-        case 2: write(d, vd + (1u << imm4));                        break; // addei!
-        case 3: write(d, vd - (1u << imm4));                        break; // subei!
+        case 0: writeReg(d, imm5 ? (vd << imm5) : vd);                 break; // slli!
+        case 1: writeReg(d, imm5 ? (vd >> imm5) : vd);                 break; // srli!
+        case 2: writeReg(d, vd + (1u << imm4));                        break; // addei!
+        case 3: writeReg(d, vd - (1u << imm4));                        break; // subei!
         default: break;
         }
         break;
@@ -1957,7 +1963,7 @@ uint8_t spg290::decode16()
     {
         uint8_t d  = (w >> 8) & 0xF;
         uint8_t bn = (w >> 3) & 0x1F;
-        uint32_t vd = read(d);
+        uint32_t vd = regs[d];
         SetFlag(N, (vd >> 31) & 1);
         SetFlag(Z, ((vd >> bn) & 1) == 0);
         break;
@@ -1967,8 +1973,8 @@ uint8_t spg290::decode16()
         uint8_t func = (w >> 11) & 0x1;
         uint8_t d    = (w >> 4) & 0xF;
         uint8_t a    = w & 0xF;
-        if (func == 0) write(d, read((uint8_t)(a + 16)));       // mlfh! rD(lo) = rA(hi)
-        else           write((uint8_t)(d + 16), read(a));       // mhfl! rD(hi) = rA(lo)
+        if (func == 0) writeReg(d, regs[(uint8_t)(a + 16)]);       // mlfh! rD(lo) = rA(hi)
+        else           writeReg((uint8_t)(d + 16), regs[a]);       // mhfl! rD(hi) = rA(lo)
         break;
     }
     case 0x5: // mem simple : func3[11:9] rD[8:5] rA[4:1]
@@ -1976,15 +1982,15 @@ uint8_t spg290::decode16()
         uint8_t func = (w >> 9) & 0x7;
         uint8_t d    = (w >> 5) & 0xF;
         uint8_t a    = (w >> 1) & 0xF;
-        uint16_t addr = (uint16_t)read(a);
+        uint16_t addr = (uint16_t)regs[a];
         switch (func)
         {
-        case 0: write(d, read(addr));                                            break; // lw!
-        case 1: write(d, (uint32_t)(int32_t)(int16_t)(read(addr) & 0xFFFF));     break; // lh!
-        case 2: write(d, read(addr) & 0xFF);                                     break; // lbu!
-        case 3: write(addr, read(d));                                            break; // sw!
-        case 4: write(addr, (read(addr) & ~0xFFFFu) | (read(d) & 0xFFFFu));      break; // sh!
-        case 5: write(addr, (read(addr) & ~0xFFu) | (read(d) & 0xFFu));          break; // sb!
+        case 0: writeReg(d, read(addr));                                            break; // lw!
+        case 1: writeReg(d, (uint32_t)(int32_t)(int16_t)(read(addr) & 0xFFFF));     break; // lh!
+        case 2: writeReg(d, read(addr) & 0xFF);                                     break; // lbu!
+        case 3: write(addr, regs[d]);                                            break; // sw!
+        case 4: write(addr, (read(addr) & ~0xFFFFu) | (regs[d] & 0xFFFFu));      break; // sh!
+        case 5: write(addr, (read(addr) & ~0xFFu) | (regs[d] & 0xFFu));          break; // sb!
         default: break;
         }
         break;
@@ -1994,15 +2000,15 @@ uint8_t spg290::decode16()
         uint8_t func = (w >> 9) & 0x7;
         uint8_t d    = (w >> 5) & 0xF;
         uint8_t imm5 = w & 0x1F;
-        uint32_t bp  = read(2);
+        uint32_t bp  = regs[2];
         switch (func)
         {
-        case 0: write(d, read((uint16_t)(bp + (imm5 << 2))));                                          break; // lwp!
-        case 1: write(d, (uint32_t)(int32_t)(int16_t)(read((uint16_t)(bp + (imm5 << 1))) & 0xFFFF));   break; // lhp!
-        case 2: write(d, read((uint16_t)(bp + imm5)) & 0xFF);                                          break; // lbup!
-        case 3: write((uint16_t)(bp + (imm5 << 2)), read(d));                                          break; // swp!
-        case 4: { uint16_t ad = (uint16_t)(bp + (imm5 << 1)); write(ad, (read(ad) & ~0xFFFFu) | (read(d) & 0xFFFFu)); break; } // shp!
-        case 5: { uint16_t ad = (uint16_t)(bp + imm5);        write(ad, (read(ad) & ~0xFFu)   | (read(d) & 0xFFu));   break; } // sbp!
+        case 0: writeReg(d, read((uint16_t)(bp + (imm5 << 2))));                                          break; // lwp!
+        case 1: writeReg(d, (uint32_t)(int32_t)(int16_t)(read((uint16_t)(bp + (imm5 << 1))) & 0xFFFF));   break; // lhp!
+        case 2: writeReg(d, read((uint16_t)(bp + imm5)) & 0xFF);                                          break; // lbup!
+        case 3: write((uint16_t)(bp + (imm5 << 2)), regs[d]);                                          break; // swp!
+        case 4: { uint16_t ad = (uint16_t)(bp + (imm5 << 1)); write(ad, (read(ad) & ~0xFFFFu) | (regs[d] & 0xFFFFu)); break; } // shp!
+        case 5: { uint16_t ad = (uint16_t)(bp + imm5);        write(ad, (read(ad) & ~0xFFu)   | (regs[d] & 0xFFu));   break; } // sbp!
         default: break;
         }
         break;
@@ -2014,16 +2020,16 @@ uint8_t spg290::decode16()
         uint8_t d    = (w >> 6) & 0xF;
         uint8_t a    = (w >> 2) & 0xF;
         uint8_t dreg = hbit ? (uint8_t)(d + 16) : d;
-        uint32_t base = read(a);
+        uint32_t base = regs[a];
         if (func == 0) // pop! : load then post-increment by 4
         {
-            write(dreg, read((uint16_t)base));
-            write(a, base + 4);
+            writeReg(dreg, read((uint16_t)base));
+            writeReg(a, base + 4);
         }
         else           // push! : pre-decrement by 4 then store
         {
-            write((uint16_t)(base - 4), read(dreg));
-            write(a, base - 4);
+            write((uint16_t)(base - 4), regs[dreg]);
+            writeReg(a, base - 4);
         }
         break;
     }
@@ -2040,7 +2046,7 @@ uint8_t spg290::decode16()
         uint8_t cond = (w >> 8) & 0xF;
         uint8_t a    = (w >> 4) & 0xF;
         if (evalCondition(cond))
-            pc = read(a);
+            pc = regs[a];
         break;
     }
     case 0xA: // jx! : LK[11] Disp11[10:0]
@@ -2048,7 +2054,7 @@ uint8_t spg290::decode16()
         uint8_t  lk    = (w >> 11) & 0x1;
         uint32_t disp  = w & 0x7FF;
         if (lk)
-            write(3, pc);          // link register r3 = following instruction
+            writeReg(3, pc);          // link register r3 = following instruction
         pc = disp;
         break;
     }
@@ -2122,7 +2128,7 @@ uint8_t spg290::MFCR()
 {
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
     uint8_t regnum = (instr & 0x1F0000) >> 16;
-    write(d_reg, cr[regnum]);
+    writeReg(d_reg, cr[regnum]);
     return 1;
 }
 
@@ -2130,7 +2136,7 @@ uint8_t spg290::MTCR()
 {
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
     uint8_t regnum = (instr & 0x1F0000) >> 16;
-    cr[regnum] = read(d_reg);
+    cr[regnum] = regs[d_reg];
     return 1;
 }
 
@@ -2138,7 +2144,7 @@ uint8_t spg290::MFSR()
 {
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
     uint8_t regnum = (instr & 0x1F0000) >> 16;
-    write(d_reg, sr[regnum]);
+    writeReg(d_reg, sr[regnum]);
     return 1;
 }
 
@@ -2146,7 +2152,7 @@ uint8_t spg290::MTSR()
 {
     uint8_t a_reg  = (instr & 0x3E00000) >> 21;   // mtsr names its source rA
     uint8_t regnum = (instr & 0x1F0000) >> 16;
-    sr[regnum] = read(a_reg);
+    sr[regnum] = regs[a_reg];
     return 1;
 }
 
@@ -2155,7 +2161,7 @@ uint8_t spg290::MFCX()
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
     uint8_t regnum = (instr & 0x1F0000) >> 16;
     uint8_t cp     = (instr >> 8) & 0x3;
-    write(d_reg, copData[cp][regnum]);
+    writeReg(d_reg, copData[cp][regnum]);
     return 1;
 }
 
@@ -2164,7 +2170,7 @@ uint8_t spg290::MTCX()
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
     uint8_t regnum = (instr & 0x1F0000) >> 16;
     uint8_t cp     = (instr >> 8) & 0x3;
-    copData[cp][regnum] = read(d_reg);
+    copData[cp][regnum] = regs[d_reg];
     return 1;
 }
 
@@ -2173,7 +2179,7 @@ uint8_t spg290::MFCCX()
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
     uint8_t regnum = (instr & 0x1F0000) >> 16;
     uint8_t cp     = (instr >> 8) & 0x3;
-    write(d_reg, copCtrl[cp][regnum]);
+    writeReg(d_reg, copCtrl[cp][regnum]);
     return 1;
 }
 
@@ -2182,7 +2188,7 @@ uint8_t spg290::MTCCX()
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
     uint8_t regnum = (instr & 0x1F0000) >> 16;
     uint8_t cp     = (instr >> 8) & 0x3;
-    copCtrl[cp][regnum] = read(d_reg);
+    copCtrl[cp][regnum] = regs[d_reg];
     return 1;
 }
 
@@ -2195,9 +2201,9 @@ uint8_t spg290::MFCEX()
     uint8_t hilo  = (instr >> 8) & 0x3;
     switch (hilo)
     {
-    case 0x1: write(d_reg, cel); break;                       // mfcel
-    case 0x2: write(d_reg, ceh); break;                       // mfceh
-    case 0x3: write(d_reg, ceh); write(a_reg, cel); break;    // mfcehl
+    case 0x1: writeReg(d_reg, cel); break;                       // mfcel
+    case 0x2: writeReg(d_reg, ceh); break;                       // mfceh
+    case 0x3: writeReg(d_reg, ceh); writeReg(a_reg, cel); break;    // mfcehl
     default: break;
     }
     return 1;
@@ -2210,9 +2216,9 @@ uint8_t spg290::MTCEX()
     uint8_t hilo  = (instr >> 8) & 0x3;
     switch (hilo)
     {
-    case 0x1: cel = read(d_reg); break;                       // mtcel
-    case 0x2: ceh = read(d_reg); break;                       // mtceh
-    case 0x3: ceh = read(d_reg); cel = read(a_reg); break;    // mtcehl
+    case 0x1: cel = regs[d_reg]; break;                       // mtcel
+    case 0x2: ceh = regs[d_reg]; break;                       // mtceh
+    case 0x3: ceh = regs[d_reg]; cel = regs[a_reg]; break;    // mtcehl
     default: break;
     }
     return 1;
@@ -2285,7 +2291,7 @@ uint8_t spg290::LDCX()
     uint8_t creg   = (instr >> 16) & 0x1F;
     uint8_t cp     = (instr >> 8) & 0x3;
     int32_t imm    = (int32_t)(int8_t)(instr & 0xFF);
-    uint16_t addr  = (uint16_t)(read(base) + (uint32_t)imm);
+    uint16_t addr  = (uint16_t)(regs[base] + (uint32_t)imm);
     copData[cp][creg] = read(addr);
     return 1;
 }
@@ -2297,7 +2303,7 @@ uint8_t spg290::STCX()
     uint8_t creg   = (instr >> 16) & 0x1F;
     uint8_t cp     = (instr >> 8) & 0x3;
     int32_t imm    = (int32_t)(int8_t)(instr & 0xFF);
-    uint16_t addr  = (uint16_t)(read(base) + (uint32_t)imm);
+    uint16_t addr  = (uint16_t)(regs[base] + (uint32_t)imm);
     write(addr, copData[cp][creg]);
     return 1;
 }
@@ -2334,9 +2340,9 @@ uint32_t spg290::combineLoad(uint32_t lcr, uint32_t mem, uint8_t off)
 uint8_t spg290::LCB()
 {
     uint8_t a_reg = (instr >> 16) & 0x1F;
-    uint32_t ra   = read(a_reg);
+    uint32_t ra   = regs[a_reg];
     sr[1] = read((uint16_t)(ra >> 2));        // LCR = Mem[aligned word]
-    write(a_reg, ra + 4);
+    writeReg(a_reg, ra + 4);
     return 1;
 }
 
@@ -2344,12 +2350,12 @@ uint8_t spg290::LCW()
 {
     uint8_t d_reg = (instr >> 21) & 0x1F;
     uint8_t a_reg = (instr >> 16) & 0x1F;
-    uint32_t ra   = read(a_reg);
+    uint32_t ra   = regs[a_reg];
     uint8_t off   = ra & 3;
     uint32_t mem  = read((uint16_t)(ra >> 2));
-    write(d_reg, combineLoad(sr[1], mem, off));
+    writeReg(d_reg, combineLoad(sr[1], mem, off));
     sr[1] = mem;                              // LCR = newly read word
-    write(a_reg, ra + 4);
+    writeReg(a_reg, ra + 4);
     return 1;
 }
 
@@ -2357,19 +2363,19 @@ uint8_t spg290::LCE()
 {
     uint8_t d_reg = (instr >> 21) & 0x1F;
     uint8_t a_reg = (instr >> 16) & 0x1F;
-    uint32_t ra   = read(a_reg);
+    uint32_t ra   = regs[a_reg];
     uint8_t off   = ra & 3;
     if (off == 0)
     {
-        write(d_reg, sr[1]);                  // aligned: rD = LCR, LCR unchanged
+        writeReg(d_reg, sr[1]);                  // aligned: rD = LCR, LCR unchanged
     }
     else
     {
         uint32_t mem = read((uint16_t)(ra >> 2));
-        write(d_reg, combineLoad(sr[1], mem, off));
+        writeReg(d_reg, combineLoad(sr[1], mem, off));
         sr[1] = mem;
     }
-    write(a_reg, ra + 4);
+    writeReg(a_reg, ra + 4);
     return 1;
 }
 
@@ -2377,10 +2383,10 @@ uint8_t spg290::SCB()
 {
     uint8_t d_reg = (instr >> 21) & 0x1F;
     uint8_t a_reg = (instr >> 16) & 0x1F;
-    uint32_t ra   = read(a_reg);
+    uint32_t ra   = regs[a_reg];
     uint8_t off   = ra & 3;
     uint16_t slot = (uint16_t)(ra >> 2);
-    sr[2] = read(d_reg);                      // SCR latches the source word
+    sr[2] = regs[d_reg];                      // SCR latches the source word
     if (off == 0)
     {
         write(slot, sr[2]);
@@ -2391,7 +2397,7 @@ uint8_t spg290::SCB()
         // Keep the slot's low off bytes; place rD's low (4-off) bytes above.
         write(slot, (read(slot) & lowMask) | (sr[2] << (8u * off)));
     }
-    write(a_reg, ra + 4);
+    writeReg(a_reg, ra + 4);
     return 1;
 }
 
@@ -2399,23 +2405,23 @@ uint8_t spg290::SCW()
 {
     uint8_t d_reg = (instr >> 21) & 0x1F;
     uint8_t a_reg = (instr >> 16) & 0x1F;
-    uint32_t ra   = read(a_reg);
+    uint32_t ra   = regs[a_reg];
     uint8_t off   = ra & 3;
     uint16_t slot = (uint16_t)(ra >> 2);
-    uint32_t rd   = read(d_reg);
+    uint32_t rd   = regs[d_reg];
     if (off == 0)
         write(slot, rd);
     else
         write(slot, (sr[2] >> (8u * (4u - off))) | (rd << (8u * off)));
     sr[2] = rd;
-    write(a_reg, ra + 4);
+    writeReg(a_reg, ra + 4);
     return 1;
 }
 
 uint8_t spg290::SCE()
 {
     uint8_t a_reg = (instr >> 16) & 0x1F;
-    uint32_t ra   = read(a_reg);
+    uint32_t ra   = regs[a_reg];
     uint8_t off   = ra & 3;
     uint16_t slot = (uint16_t)(ra >> 2);
     if (off != 0)
@@ -2424,6 +2430,6 @@ uint8_t spg290::SCE()
         // Keep the slot's high (4-off) bytes; place SCR's high off bytes below.
         write(slot, (read(slot) & ~lowMask) | (sr[2] >> (8u * (4u - off))));
     }
-    write(a_reg, ra + 4);
+    writeReg(a_reg, ra + 4);
     return 1;
 }

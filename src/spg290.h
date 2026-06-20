@@ -59,6 +59,10 @@ public:
 	uint32_t copData[4][32] = {{0}};
 	uint32_t copCtrl[4][32] = {{0}};
 
+	// General-purpose registers r0..r31.
+	// r0 is hardwired to 0 — writes are silently ignored (see writeReg()).
+	uint32_t regs[32] = {0};
+
 	// I don't think SPG290 has an accumulator, so we probs don't need this
 	uint8_t acc = 0x00; // Accumulator register (this is where we store temp numbers for arithmetic)
 	uint8_t x = 0x00; // X register
@@ -80,6 +84,8 @@ private:
 	Bus		*bus = nullptr;
 	uint32_t read(uint16_t a);
 	void	write(uint16_t a, uint32_t d);
+	// Write to a GPR, ignoring writes to r0 (hardwired zero).
+	void    writeReg(uint8_t r, uint32_t val);
 
 	void	SetFlag(FLAGS290 f, bool v);
 
