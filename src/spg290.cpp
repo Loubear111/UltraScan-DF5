@@ -82,7 +82,7 @@ void spg290::clock()
 			case F6_CMP:     CMP();     break;
 			case F6_CMPZ:    CMPZ();    break;
 			case F6_MVCOND:  MVCOND();  break;
-			case F6_MTCEH:   MTCEH();   break;
+			// case F6_MTCEH: — merged into F6_MTCEL case (same func6=0x25)
 			case F6_REM:     REM();     break;
 			case F6_REMU:    REMU();    break;
 			case F6_ANDX:    ANDX();    break;
@@ -122,13 +122,18 @@ void spg290::clock()
 			case F6_MULU:    MULU();    break;
 			case F6_DIV:     DIV();     break;
 			case F6_DIVU:    DIVU();    break;
-			case F6_MFCEL:   MFCEL();   break;
-			case F6_MFCEH:   MFCEH();   break;
-			case F6_MTCEL:   MTCEL();   break;
+			case F6_MFCEL:  // 0x24: covers both MFCEL and MFCEH (rB=1 vs rB=2)
+				if (((instr & 0x7C00) >> 10) == 2) MFCEH(); else MFCEL();
+				break;
+			// case F6_MFCEH: — same value as F6_MFCEL; handled above.
+			case F6_MTCEL:  // 0x25: covers both MTCEL and MTCEH (rB=1 vs rB=2)
+				if (((instr & 0x7C00) >> 10) == 2) MTCEH(); else MTCEL();
+				break;
+			// case F6_MTCEH: — same value as F6_MTCEL; handled above.
 			case F6_MAD:     MAD();     break;
 			case F6_MADU:    MADU();    break;
 			case F6_MSB:     MSB();     break;
-			case F6_MSBU:    MSBU();    break;
+			case F6_MSBU:    MSBU();    break;  // 0x32 (was 0x0F, moved to avoid conflict)
 			case F6_MULF:    MULF();    break;
 			case F6_MADF:    MADF();    break;
 			default: break;
@@ -141,13 +146,22 @@ void spg290::clock()
 			switch (func3)
 			{
 			case F3_ADDIX:  ADDIX();  break;
-			case F3_ORIX:   ORIX();   break;
+			case F3_ORIX:   ORIX();   break;  // ori:  func3=5
 			case F3_CMPI:   CMPI();   break;
-			case F3_LDI:    LDI();    break;
-			case F3_ANDIX:  ANDIX();  break;
-			case F3_ANDISX: ANDISX(); break;
-			case F3_ADDISX: ADDISX(); break;
-			case F3_ORISX:  ORISX();  break;
+			case F3_LDI:    LDI();    break;  // ldi:  func3=6
+			case F3_ANDIX:  ANDIX();  break;  // andi: func3=4
+			default: break;
+			}
+			break;
+		}
+		case OP_ITYPE_S:  // opcode=5: shifted-immediate (addis/andis/oris)
+		{
+			uint8_t func3 = (instr & func3_MASK) >> 18;
+			switch (func3)
+			{
+			case F3_ADDISX: ADDISX(); break;  // addis: func3=0
+			case F3_ANDISX: ANDISX(); break;  // andis: func3=4
+			case F3_ORISX:  ORISX();  break;  // oris:  func3=5
 			default: break;
 			}
 			break;
@@ -243,8 +257,8 @@ uint8_t spg290::ADDIX()
     // Extract destination register from bits 25-21
     d_reg = (instr & 0x3E00000) >> 21;
 
-    // Extract 16-bit signed immediate (bits 16:1) and sign-extend to 32 bits
-    imm = (int16_t)((instr >> 1) & 0xFFFF);
+    // Extract 16-bit signed immediate: imm[15:14] from bits 17:16, imm[13:0] from bits 14:1.
+    imm = (int16_t)(((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1));
     uint32_t sign_extended_imm = (uint32_t)imm;
 
     // Read the current value of the destination register
@@ -277,8 +291,8 @@ uint8_t spg290::ADDISX()
     // Extract destination register rD from bits 25-21
     d_reg = (instr & 0x3E00000) >> 21;
 
-    // Extract the 16-bit signed immediate value (SImm16) from bits 16-1 and sign-extend
-    imm16 = (int16_t)((instr >> 1) & 0xFFFF);
+    // Extract 16-bit signed immediate: imm[15:14] from bits 17:16, imm[13:0] from bits 14:1.
+    imm16 = (int16_t)(((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1));
 
     // Read the current value of register rD
     d_val = regs[d_reg];
@@ -417,8 +431,8 @@ uint8_t spg290::ANDISX()
     // Extract destination register (rD) from bits 25-21
     d_reg = (instr & 0x3E00000) >> 21;
 
-    // Extract Imm16 from bits 16-1
-    imm16 = (instr >> 1) & 0xFFFF;
+    // Extract Imm16: non-contiguous layout — imm[15:14] from bits 17:16, imm[13:0] from bits 14:1.
+    imm16 = ((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1);
 
     // Shift Imm16 left by 16 bits to form the 32-bit value
     imm_shifted = (uint32_t)imm16 << 16;
@@ -820,7 +834,7 @@ uint8_t spg290::MVCOND()
 uint8_t spg290::ORIX()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
-    uint32_t imm16 = (instr >> 1) & 0xFFFF;        // zero-extended
+    uint32_t imm16 = ((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1);  // zero-extended
     uint32_t r = regs[d_reg] | imm16;
 
     if (instr & CU_MASK)
@@ -836,7 +850,7 @@ uint8_t spg290::ORIX()
 uint8_t spg290::ORISX()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
-    uint32_t imm16 = (instr >> 1) & 0xFFFF;
+    uint32_t imm16 = ((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1);
     uint32_t r = regs[d_reg] | (imm16 << 16);
 
     if (instr & CU_MASK)
@@ -869,7 +883,7 @@ uint8_t spg290::ORRIX()
 uint8_t spg290::SUBIX()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
-    int32_t  imm   = (int16_t)((instr >> 1) & 0xFFFF);   // sign-extended
+    int32_t  imm   = (int16_t)(((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1));   // sign-extended
     uint32_t a = regs[d_reg];
     uint32_t b = (uint32_t)imm;
     uint32_t r = a - b;
@@ -889,7 +903,7 @@ uint8_t spg290::SUBIX()
 uint8_t spg290::SUBISX()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
-    int32_t  imm   = (int16_t)((instr >> 1) & 0xFFFF);
+    int32_t  imm   = (int16_t)(((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1));
     uint32_t a = regs[d_reg];
     uint32_t b = ((uint32_t)imm) << 16;
     uint32_t r = a - b;
@@ -931,7 +945,7 @@ uint8_t spg290::SUBRIX()
 uint8_t spg290::CMPI()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
-    int32_t  imm   = (int16_t)((instr >> 1) & 0xFFFF);
+    int32_t  imm   = (int16_t)(((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1));
     uint32_t a = regs[d_reg];
     uint32_t b = (uint32_t)imm;
     uint32_t r = a - b;
@@ -948,7 +962,7 @@ uint8_t spg290::CMPI()
 uint8_t spg290::LDI()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    int32_t imm   = (int16_t)((instr >> 1) & 0xFFFF);  // sign-extended
+    int32_t imm   = (int16_t)(((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1));  // sign-extended
     writeReg(d_reg, (uint32_t)imm);
     return 1;
 }
@@ -956,7 +970,7 @@ uint8_t spg290::LDI()
 uint8_t spg290::LDIS()
 {
     uint8_t  d_reg = (instr & 0x3E00000) >> 21;
-    uint32_t imm16 = (instr >> 1) & 0xFFFF;
+    uint32_t imm16 = ((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1);
     writeReg(d_reg, imm16 << 16);
     return 1;
 }

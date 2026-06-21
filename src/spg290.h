@@ -141,91 +141,100 @@ private:
 	// ============================================================
 
 	// Opcode-0 func6 values
+	// R-type func6 field (bits 6:1). Values confirmed from score-elf-as
+	// (binutils 2.25) unless marked TODO.
+	// Values 0x60+ are placeholders for unknowns that conflicted with confirmed ones.
 	enum FUNC6
 	{
-		F6_NOP    = 0x00,
-		F6_ADDX   = 0x01,
-		F6_ADDCX  = 0x02,
-		F6_SUBX   = 0x03,
-		F6_SUBCX  = 0x04,
-		F6_NEGX   = 0x05,
-		F6_CMP    = 0x06,
-		F6_CMPZ   = 0x07,
-		F6_MVCOND = 0x08,
-		F6_MTCEH  = 0x09,
-		F6_REM    = 0x0A,
-		F6_REMU   = 0x0B,
-		F6_MAD    = 0x0C,
-		F6_MADU   = 0x0D,
-		F6_MSB    = 0x0E,
-		F6_MSBU   = 0x0F,
-		F6_MULF   = 0x15,
-		F6_MADF   = 0x16,
-		F6_ANDX   = 0x10,
-		F6_ORX    = 0x11,
-		F6_XORX   = 0x12,
-		F6_NOTX   = 0x13,
-		F6_BITTSTC= 0x14,
-		// 0x17..0x1F: filled in with the second wave of instructions.
-		F6_ROLC   = 0x17,   // rolc.c  : rotate left through carry (register)
-		F6_ROLIC  = 0x18,   // rolic.c : rotate left through carry (immediate)
-		F6_RORC   = 0x19,   // rorc.c  : rotate right through carry (register)
-		F6_RORIC  = 0x1A,   // roric.c : rotate right through carry (immediate)
-		F6_ADDS   = 0x1B,   // add.s   : add with signed saturation
-		F6_SUBS   = 0x1C,   // sub.s   : subtract with signed saturation
-		F6_ABSS   = 0x1D,   // abs.s   : absolute value with signed saturation
-		F6_SLLS   = 0x1E,   // sll.s   : shift-left logical with signed saturation
-		F6_MSBF   = 0x1F,   // msb.f   : {CEH,CEL} -= (rA*rB)<<1 (signed fractional)
-		F6_SLLX   = 0x20,
-		F6_SRLX   = 0x21,
-		F6_SRAX   = 0x22,
-		F6_ROLX   = 0x23,
-		F6_RORX   = 0x24,
-		F6_SLLIX  = 0x25,
-		F6_SRLIX  = 0x26,
-		F6_SRAIX  = 0x27,
-		F6_ROLIX  = 0x28,
-		F6_RORIX  = 0x29,
-		F6_EXTSBX = 0x30,
-		F6_EXTSHX = 0x31,
-		F6_EXTZBX = 0x32,
-		F6_EXTZHX = 0x33,
-		F6_CLZ    = 0x34,
-		F6_ABS    = 0x35,
-		F6_MIN    = 0x36,
-		F6_MAX    = 0x37,
-		F6_BITREV = 0x38,
-		F6_MUL    = 0x39,
-		F6_MULU   = 0x3A,
-		F6_DIV    = 0x3B,
-		F6_DIVU   = 0x3C,
-		F6_MFCEL  = 0x3D,
-		F6_MFCEH  = 0x3E,
-		F6_MTCEL  = 0x3F,
+		F6_NOP    = 0x00,  // nop              confirmed
+		F6_ADDX   = 0x08,  // add    (was 0x01)
+		F6_ADDCX  = 0x09,  // addc   (was 0x02)
+		F6_SUBX   = 0x0A,  // sub    (was 0x03)
+		F6_SUBCX  = 0x0B,  // subc   (was 0x04)
+		F6_NEGX   = 0x0F,  // neg    (was 0x05)
+		F6_CMP    = 0x06,  // TODO: real encoding unknown, no conflict
+		F6_CMPZ   = 0x07,  // TODO: real encoding unknown, no conflict
+		F6_MVCOND = 0x26,  // TODO: unknown (was 0x08, conflicted with ADDX)
+		F6_REM    = 0x27,  // TODO: unknown (was 0x0A, conflicted with SUBX)
+		F6_REMU   = 0x28,  // TODO: unknown (was 0x0B, conflicted with SUBCX)
+		F6_MAD    = 0x0C,  // HWMAC sub-field (not R-type dispatch)
+		F6_MADU   = 0x0D,  // HWMAC sub-field
+		F6_MSB    = 0x0E,  // HWMAC sub-field
+			// F6_MSBU: moved to 0x32 below (was 0x0F, conflicted with new F6_NEGX)
+		F6_ANDX   = 0x10,  // and              confirmed
+		F6_ORX    = 0x11,  // or               confirmed
+		F6_NOTX   = 0x12,  // not    (was 0x13, swapped with XOR)
+		F6_XORX   = 0x13,  // xor    (was 0x12, swapped with NOT)
+		F6_BITTSTC= 0x14,  // TODO: real encoding unknown, no conflict
+		F6_MULF   = 0x15,  // HWMAC sub-field (TODO: confirm)
+		F6_MADF   = 0x16,  // HWMAC sub-field (TODO: confirm)
+		F6_ROLC   = 0x17,  // rolc.c  TODO: unknown, no conflict
+		F6_ROLIC  = 0x29,  // rolic.c TODO: unknown (was 0x18, conflicted with SLLX)
+		F6_RORC   = 0x19,  // rorc.c  TODO: unknown, no conflict
+		F6_RORIC  = 0x2A,  // roric.c TODO: unknown (was 0x1A, conflicted with SRLX)
+		// Saturating/fractional live in OP_HWMAC — kept as aliases for HWMAC dispatch.
+		F6_ADDS   = 0x2B,  // add.s → HWMAC (was 0x1B, conflicted with SRAX)
+		F6_SUBS   = 0x30,  // sub.s → HWMAC (was 0x1C, conflicted with RORX)
+		F6_ABSS   = 0x1D,  // abs.s → HWMAC, no conflict
+		F6_SLLS   = 0x31,  // sll.s → HWMAC (was 0x1E, conflicted with ROLX)
+		F6_MSBF   = 0x1F,  // msb.f → HWMAC, no conflict
+		F6_SLLX   = 0x18,  // sll    (was 0x20)
+		F6_SRLX   = 0x1A,  // srl    (was 0x21)
+		F6_SRAX   = 0x1B,  // sra    (was 0x22)
+		F6_ROLX   = 0x1E,  // rol    (was 0x23)
+		F6_RORX   = 0x1C,  // ror    (was 0x24)
+		F6_SLLIX  = 0x38,  // slli   (was 0x25)
+		F6_SRLIX  = 0x3A,  // srli   (was 0x26)
+		F6_SRAIX  = 0x3B,  // srai   (was 0x27)
+		F6_ROLIX  = 0x3E,  // roli   (was 0x28)
+		F6_RORIX  = 0x3C,  // rori   (was 0x29)
+		F6_EXTSBX = 0x2C,  // extsb  (was 0x30)
+		F6_EXTSHX = 0x2D,  // extsh  (was 0x31)
+		F6_EXTZBX = 0x2E,  // extzb  (was 0x32)
+		F6_EXTZHX = 0x2F,  // extzh  (was 0x33)
+		// CLZ/ABS/MIN/MAX/BITREV live in OP_HWMAC, kept as aliases.
+		F6_CLZ    = 0x34,  // clz → HWMAC (no conflict, kept at original value)
+		F6_ABS    = 0x35,  // abs → HWMAC (no conflict)
+		F6_MIN    = 0x36,  // min → HWMAC (no conflict)
+		F6_MAX    = 0x37,  // max → HWMAC (no conflict)
+		F6_BITREV = 0x33,  // bitrev → HWMAC (was 0x38, conflicted with SLLIX)
+		F6_MUL    = 0x20,  // mul    (was 0x39)
+		F6_MULU   = 0x21,  // mulu   (was 0x3A)
+		F6_DIV    = 0x22,  // div    (was 0x3B)
+		F6_DIVU   = 0x23,  // divu   (was 0x3C)
+		// MFCEL/MFCEH share func6=0x24; rB field distinguishes (1=CEL, 2=CEH).
+		F6_MFCEL  = 0x24,  // mfcel  (was 0x3D)
+		F6_MFCEH  = 0x24,  // mfceh  same func6 as MFCEL (was 0x3E)
+		// MTCEL/MTCEH share func6=0x25; rB field distinguishes (1=CEL, 2=CEH).
+		F6_MTCEL  = 0x25,  // mtcel  (was 0x3F)
+		F6_MTCEH  = 0x25,  // mtceh  same func6 as MTCEL (was 0x09)
+		// MSBU shares 0x0F with NEGX; moved to 0x32
+		F6_MSBU   = 0x32,  // msbu HWMAC sub-field (was 0x0F, conflicted with NEGX)
 	};
 
-	// I-type opcodes / func3 values
+	// Opcode field (bits 30:26). Values confirmed from score-elf-as unless TODO.
 	enum OPCODES_ENUM
 	{
 		OP_RTYPE    = 0x00,
-		OP_ITYPE1   = 0x01,
-		OP_ITYPE2   = 0x02,
-		OP_ANDRIX   = 0x0C,
-		OP_ADDRIX   = 0x0D,
-		OP_ORRIX    = 0x0E,
-		OP_SUBRIX   = 0x0F,
-		// Load / store (rD, rA, signed Imm15). Effective address is a word index.
-		OP_LW       = 0x10,
-		OP_SW       = 0x11,
-		OP_LBU      = 0x12,
-		OP_LB       = 0x13,
-		OP_LHU      = 0x14,
-		OP_LH       = 0x15,
-		OP_SB       = 0x16,
-		OP_SH       = 0x17,
+		OP_ITYPE1   = 0x01,  // addi/ori/ldi/andi/cmpi (func3 selects)
+		OP_JX       = 0x02,  // j/jl: absolute jump (was 0x19)
+		OP_ITYPE_S  = 0x05,  // addis/andis/oris: shifted-immediate class
+		OP_ANDRIX   = 0x0C,  // andri: rD=rA & imm14   confirmed
+		OP_ADDRIX   = 0x08,  // addri: rD=rA + imm14   (was 0x0D)
+		OP_ORRIX    = 0x0D,  // orri:  rD=rA | imm14   (was 0x0E)
+		OP_SUBRIX   = 0x0F,  // subri: TODO (GAS uses addri(-n); kept for compat)
+		OP_ITYPE2   = 0x03,  // placeholder: SUBIX/LDIS real opcode TODO (was 0x02, conflicted with JX)
+		// Load / store opcodes — all confirmed from score-elf-as:
+		OP_LW       = 0x10,  // lw   confirmed
+		OP_LH       = 0x11,  // lh   (was OP_SW=0x11)
+		OP_LHU      = 0x12,  // lhu  (was OP_LBU=0x12)
+		OP_LB       = 0x13,  // lb   confirmed
+		OP_SW       = 0x14,  // sw   (was OP_LHU=0x14)
+		OP_SH       = 0x15,  // sh   (was OP_LH=0x15)
+		OP_LBU      = 0x16,  // lbu  (was OP_SB=0x16)
+		OP_SB       = 0x17,  // sb   (was OP_SH=0x17)
 		// Control flow
 		OP_BCOND    = 0x18,   // BC[25:22], signed Disp[21:1]
-		OP_JX       = 0x19,   // Disp24[24:1], LK bit 0
 		OP_BR       = 0x1A,   // BC[25:22], rA[20:16]
 		// Pre/post-index load/store family. rD[25:21], rA[20:16],
 		// sub-op[15:13] (0=lw,1=sw,2=lbu,3=lb,4=lhu,5=lh,6=sb,7=sh),
@@ -288,17 +297,23 @@ private:
 	// func3 within OP_ITYPE1
 	enum FUNC3_I1
 	{
-		F3_ADDIX  = 0x0,
-		F3_ORIX   = 0x1,
-		F3_CMPI   = 0x2,
-		F3_LDI    = 0x3,
-		F3_ANDIX  = 0x4,
-		F3_ANDISX = 0x5,
-		F3_ADDISX = 0x6,
-		F3_ORISX  = 0x7,
+		F3_ADDIX  = 0x0,  // addi  confirmed
+		F3_ORIX   = 0x5,  // ori   (was 0x1)
+		F3_CMPI   = 0x2,  // cmpi  TODO: real encoding unknown, no conflict
+		F3_LDI    = 0x6,  // ldi   (was 0x3)
+		F3_ANDIX  = 0x4,  // andi  confirmed
 	};
 
-	// func3 within OP_ITYPE2
+	// func3 within OP_ITYPE_S (opcode 0x05: shifted-immediate class)
+	// Confirmed from score-elf-as: addis=0, andis=4, oris=5
+	enum FUNC3_IS
+	{
+		F3_ADDISX = 0x0,  // addis  (was F3_ADDISX=6 under OP_ITYPE1)
+		F3_ANDISX = 0x4,  // andis  (was F3_ANDISX=5 under OP_ITYPE1)
+		F3_ORISX  = 0x5,  // oris   (was F3_ORISX=7 under OP_ITYPE1)
+	};
+
+	// func3 within OP_ITYPE2 (opcode 0x03: placeholder — real opcodes TODO)
 	enum FUNC3_I2
 	{
 		F3_LDIS   = 0x0,
