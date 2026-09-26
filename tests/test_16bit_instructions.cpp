@@ -200,7 +200,7 @@ TEST_F(CPUFixture, MHFL16_MovesToHighBank)
 TEST_F(CPUFixture, LW16_Loads)
 {
     setReg(6, 50u);                     // base address
-    setReg(50, 0x11223344u);
+    setMem(50,  0x11223344u);
     execute(encodeLW16(4, 6));
     EXPECT_EQ(getReg(4), 0x11223344u);
 }
@@ -208,7 +208,7 @@ TEST_F(CPUFixture, LW16_Loads)
 TEST_F(CPUFixture, LH16_SignExtends)
 {
     setReg(6, 50u);
-    setReg(50, 0x0000FFFFu);
+    setMem(50,  0x0000FFFFu);
     execute(encodeLH16(4, 6));
     EXPECT_EQ(getReg(4), 0xFFFFFFFFu);
 }
@@ -216,7 +216,7 @@ TEST_F(CPUFixture, LH16_SignExtends)
 TEST_F(CPUFixture, LBU16_ZeroExtends)
 {
     setReg(6, 50u);
-    setReg(50, 0xDEADBEEFu);
+    setMem(50,  0xDEADBEEFu);
     execute(encodeLBU16(4, 6));
     EXPECT_EQ(getReg(4), 0x000000EFu);
 }
@@ -226,32 +226,32 @@ TEST_F(CPUFixture, SW16_Stores)
     setReg(4, 0xABCDEF01u);
     setReg(6, 60u);
     execute(encodeSW16(4, 6));
-    EXPECT_EQ(getReg(60), 0xABCDEF01u);
+    EXPECT_EQ(getMem(60), 0xABCDEF01u);
 }
 
 TEST_F(CPUFixture, SB16_PreservesUpperBytes)
 {
     setReg(4, 0x000000ABu);
     setReg(6, 60u);
-    setReg(60, 0x11223344u);
+    setMem(60,  0x11223344u);
     execute(encodeSB16(4, 6));
-    EXPECT_EQ(getReg(60), 0x112233ABu);
+    EXPECT_EQ(getMem(60), 0x112233ABu);
 }
 
 TEST_F(CPUFixture, SH16_PreservesUpperHalf)
 {
     setReg(4, 0x0000ABCDu);
     setReg(6, 60u);
-    setReg(60, 0x11223344u);
+    setMem(60,  0x11223344u);
     execute(encodeSH16(4, 6));
-    EXPECT_EQ(getReg(60), 0x1122ABCDu);
+    EXPECT_EQ(getMem(60), 0x1122ABCDu);
 }
 
 // ---- memory BP-relative (op16 0x6, BP = r2) ----
 TEST_F(CPUFixture, LWP16_LoadsFromBasePointer)
 {
     setReg(2, 40u);                     // BP
-    setReg(44, 0x55667788u);            // 40 + (1<<2)
+    setMem(44,  0x55667788u);            // 40 + (1<<2)
     execute(encodeLWP16(4, 1));
     EXPECT_EQ(getReg(4), 0x55667788u);
 }
@@ -259,7 +259,7 @@ TEST_F(CPUFixture, LWP16_LoadsFromBasePointer)
 TEST_F(CPUFixture, LBUP16_LoadsByteFromBasePointer)
 {
     setReg(2, 40u);
-    setReg(45, 0x000000A5u);            // 40 + 5
+    setMem(45,  0x000000A5u);            // 40 + 5
     execute(encodeLBUP16(4, 5));
     EXPECT_EQ(getReg(4), 0x000000A5u);
 }
@@ -269,7 +269,7 @@ TEST_F(CPUFixture, SWP16_StoresToBasePointer)
     setReg(2, 40u);
     setReg(4, 0x99AABBCCu);
     execute(encodeSWP16(4, 2));         // addr = 40 + (2<<2) = 48
-    EXPECT_EQ(getReg(48), 0x99AABBCCu);
+    EXPECT_EQ(getMem(48), 0x99AABBCCu);
 }
 
 // ---- stack (op16 0x7) ----
@@ -278,14 +278,14 @@ TEST_F(CPUFixture, PUSH16_PreDecrementsAndStores)
     setReg(5, 0x12121212u);
     setReg(3, 100u);                    // stack pointer base
     execute(encodePUSH16(5, 3, /*high=*/false));
-    EXPECT_EQ(getReg(96), 0x12121212u); // stored at base-4
+    EXPECT_EQ(getMem(96), 0x12121212u); // stored at base-4
     EXPECT_EQ(getReg(3), 96u);          // base decremented
 }
 
 TEST_F(CPUFixture, POP16_LoadsAndPostIncrements)
 {
     setReg(3, 96u);                     // stack pointer
-    setReg(96, 0x34343434u);
+    setMem(96,  0x34343434u);
     execute(encodePOP16(5, 3, /*high=*/false));
     EXPECT_EQ(getReg(5), 0x34343434u);
     EXPECT_EQ(getReg(3), 100u);         // base incremented by 4
@@ -296,7 +296,7 @@ TEST_F(CPUFixture, PUSHPOP16_HighBankRoundTrip)
     setReg(18, 0x77777777u);            // high-bank source
     setReg(3, 100u);
     execute(encodePUSH16(2, 3, /*high=*/true));  // push r(2+16)=r18
-    EXPECT_EQ(getReg(96), 0x77777777u);
+    EXPECT_EQ(getMem(96), 0x77777777u);
     execute(encodePOP16(4, 3, /*high=*/true));   // pop into r(4+16)=r20
     EXPECT_EQ(getReg(20), 0x77777777u);
     EXPECT_EQ(getReg(3), 100u);

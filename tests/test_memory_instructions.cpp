@@ -10,7 +10,7 @@
 TEST_F(CPUFixture, LW_Basic)
 {
     setReg(2, 100u);          // base address
-    setReg(100, 0xDEADBEEFu); // memory contents
+    setMem(100,  0xDEADBEEFu); // memory contents
     execute(encodeLW(4, 2, 0));
     EXPECT_EQ(getReg(4), 0xDEADBEEFu);
 }
@@ -18,7 +18,7 @@ TEST_F(CPUFixture, LW_Basic)
 TEST_F(CPUFixture, LW_PositiveOffset)
 {
     setReg(2, 100u);
-    setReg(105, 0x12345678u);
+    setMem(105,  0x12345678u);
     execute(encodeLW(4, 2, 5));
     EXPECT_EQ(getReg(4), 0x12345678u);
 }
@@ -26,7 +26,7 @@ TEST_F(CPUFixture, LW_PositiveOffset)
 TEST_F(CPUFixture, LW_NegativeOffset)
 {
     setReg(2, 100u);
-    setReg(99, 0xCAFEF00Du);
+    setMem(99,  0xCAFEF00Du);
     execute(encodeLW(4, 2, 0x7FFF)); // imm15 == -1
     EXPECT_EQ(getReg(4), 0xCAFEF00Du);
 }
@@ -37,14 +37,14 @@ TEST_F(CPUFixture, SW_Basic)
     setReg(4, 0x0000CAFEu); // value to store
     setReg(2, 200u);        // base address
     execute(encodeSW(4, 2, 0));
-    EXPECT_EQ(getReg(200), 0x0000CAFEu);
+    EXPECT_EQ(getMem(200), 0x0000CAFEu);
 }
 
 // --- LBU / LB : load byte ---
 TEST_F(CPUFixture, LBU_ZeroExtends)
 {
     setReg(2, 100u);
-    setReg(100, 0xDEADBEEFu);
+    setMem(100,  0xDEADBEEFu);
     execute(encodeLBU(4, 2, 0));
     EXPECT_EQ(getReg(4), 0x000000EFu);
 }
@@ -52,7 +52,7 @@ TEST_F(CPUFixture, LBU_ZeroExtends)
 TEST_F(CPUFixture, LB_SignExtends)
 {
     setReg(2, 100u);
-    setReg(100, 0x000000FFu);
+    setMem(100,  0x000000FFu);
     execute(encodeLB(4, 2, 0));
     EXPECT_EQ(getReg(4), 0xFFFFFFFFu);
 }
@@ -61,7 +61,7 @@ TEST_F(CPUFixture, LB_SignExtends)
 TEST_F(CPUFixture, LHU_ZeroExtends)
 {
     setReg(2, 100u);
-    setReg(100, 0xDEADBEEFu);
+    setMem(100,  0xDEADBEEFu);
     execute(encodeLHU(4, 2, 0));
     EXPECT_EQ(getReg(4), 0x0000BEEFu);
 }
@@ -69,7 +69,7 @@ TEST_F(CPUFixture, LHU_ZeroExtends)
 TEST_F(CPUFixture, LH_SignExtends)
 {
     setReg(2, 100u);
-    setReg(100, 0x0000FFFFu);
+    setMem(100,  0x0000FFFFu);
     execute(encodeLH(4, 2, 0));
     EXPECT_EQ(getReg(4), 0xFFFFFFFFu);
 }
@@ -79,18 +79,18 @@ TEST_F(CPUFixture, SB_PreservesUpperBytes)
 {
     setReg(4, 0x000000ABu);
     setReg(2, 200u);
-    setReg(200, 0x11223344u);
+    setMem(200,  0x11223344u);
     execute(encodeSB(4, 2, 0));
-    EXPECT_EQ(getReg(200), 0x112233ABu);
+    EXPECT_EQ(getMem(200), 0x112233ABu);
 }
 
 TEST_F(CPUFixture, SH_PreservesUpperHalf)
 {
     setReg(4, 0x0000ABCDu);
     setReg(2, 200u);
-    setReg(200, 0x11223344u);
+    setMem(200,  0x11223344u);
     execute(encodeSH(4, 2, 0));
-    EXPECT_EQ(getReg(200), 0x1122ABCDu);
+    EXPECT_EQ(getMem(200), 0x1122ABCDu);
 }
 
 // --- Round trip ---

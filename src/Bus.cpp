@@ -12,6 +12,12 @@ Bus::~Bus()
 {
 }
 
+void Bus::loadROM(const uint32_t* words, size_t count)
+{
+	for (size_t i = 0; i < count; ++i)
+		ram[i] = words[i];
+}
+
 void Bus::write(uint16_t addr, uint32_t data)
 {
 	if (addr >= 0x0000 && addr <= 0xFFFF)
