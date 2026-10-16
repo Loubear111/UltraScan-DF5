@@ -54,7 +54,7 @@ TEST_F(CPUFixture, TRAPCOND_NoOpCode_DoesNotTrap)
 {
     bus.cpu.cr[3] = 0x40;
     execute(encodeTRAPCOND(14));      // EC=14 is "no operation"
-    EXPECT_EQ(bus.cpu.pc, 1u);        // simply advanced past the instruction
+    EXPECT_EQ(bus.cpu.pc, 4u);        // simply advanced past the instruction
     EXPECT_EQ(bus.cpu.cr[2], 0u);     // ECR untouched
 }
 
@@ -71,7 +71,7 @@ TEST_F(CPUFixture, TRAPCOND_EQ_NoTrapWhenZeroClear)
 {
     bus.cpu.cr[3] = 0x50;
     execute(encodeTRAPCOND(4));       // EQ, Z clear -> no trap
-    EXPECT_EQ(bus.cpu.pc, 1u);
+    EXPECT_EQ(bus.cpu.pc, 4u);
 }
 
 // ---- syscall ----
@@ -104,7 +104,7 @@ TEST_F(CPUFixture, SystemNoOps_AdvanceWithoutSideEffects)
 {
     bus.cpu.status |= spg290::C;       // flags must survive untouched
     execute(encodeSLEEP());
-    EXPECT_EQ(bus.cpu.pc, 1u);
+    EXPECT_EQ(bus.cpu.pc, 4u);
     execute(encodeCACHE());
     execute(encodePFLUSH());
     execute(encodeSDBBP32());

@@ -175,5 +175,5 @@ TEST_F(CPUFixture, NOP_DoesNothing)
     uint32_t pcBefore = bus.cpu.pc;
     execute(encodeNOP());
     EXPECT_EQ(getReg(7), 0x12345678u); // unchanged
-    EXPECT_EQ(bus.cpu.pc, pcBefore + 1); // pc still advanced past the instr
+    EXPECT_EQ(bus.cpu.pc, pcBefore + 4); // pc still advanced past the (4-byte) instr
 }

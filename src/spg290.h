@@ -82,8 +82,16 @@ public:
 private:
 
 	Bus		*bus = nullptr;
-	uint32_t read(uint16_t a);
-	void	write(uint16_t a, uint32_t d);
+	// Byte-addressed memory access, routed through the Bus (RAM, PPU, ...).
+	// LW/SW-style word ops use readWord/writeWord; byte/half loads and
+	// stores use the matching narrower accessor instead of reading a whole
+	// word and masking, since the address is no longer assumed word-aligned.
+	uint8_t  readByte(uint32_t a);
+	void     writeByte(uint32_t a, uint8_t d);
+	uint16_t readHalf(uint32_t a);
+	void     writeHalf(uint32_t a, uint16_t d);
+	uint32_t readWord(uint32_t a);
+	void     writeWord(uint32_t a, uint32_t d);
 	// Write to a GPR, ignoring writes to r0 (hardwired zero).
 	void    writeReg(uint8_t r, uint32_t val);
 
@@ -91,6 +99,11 @@ private:
 
 	uint32_t  instr = 0x00;    // Is the instruction byte
 	uint8_t  cycles = 0;	   // Counts how many cycles the instruction has remaining
+	// Size in bytes of the instruction currently executing (2 or 4), set by
+	// clock() during fetch. Used to recover PCcurrent (= pc - instrSize) for
+	// PC-relative branches and exception EPC capture, now that pc is a real
+	// byte address rather than a word index.
+	uint8_t  instrSize = 4;
 
 	struct INSTRUCTION
 	{

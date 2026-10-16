@@ -19,10 +19,11 @@
 //   JX    disp       : unconditional absolute jump
 //   SW    rD, rA, imm: Mem[rA + sext(imm)] = rD
 //
-// Address strategy: ROM_DONE_ADDR (0xFF00) and ROM_RESULT_ADDR (0xFF01)
+// Address strategy: ROM_DONE_ADDR (0xFF00) and ROM_RESULT_ADDR (0xFF04)
 // are too large for SW's 15-bit signed immediate.  Instead we load the
-// base 0xFF00 into r8 via ORIX, then use imm=0 and imm=1 offsets:
-//   Mem[r8+1] = result     (→ 0xFF01 = ROM_RESULT_ADDR)
+// base 0xFF00 into r8 via ORIX, then use word-aligned imm=0 and imm=4
+// offsets (byte-addressed, non-overlapping 32-bit stores):
+//   Mem[r8+4] = result     (→ 0xFF04 = ROM_RESULT_ADDR)
 //   Mem[r8+0] = done flag  (→ 0xFF00 = ROM_DONE_ADDR)
 // ============================================================
 
@@ -55,16 +56,16 @@ static const uint32_t andx_smoke_rom[] = {
     /* 2  */ encodeANDX (3, 1, 2, true),           // r3 = r1 & r2 = 0x000F; sets flags
     /* 3  */ encodeADDIX(4, 0x000F, false),        // r4 = 0x000F (expected)
     /* 4  */ encodeSUBX (5, 3, 4, true),           // r5 = r3 - r4; Z=1 if equal
-    /* 5  */ encodeBCOND(4, 4),                    // EQ: if Z jump to [9]
+    /* 5  */ encodeBCOND(4, 8),                    // EQ: if Z jump to [9] (disp in halfwords: 4 instrs * 2)
     /* 6  */ encodeADDIX(6, 1, false),             // FAIL: r6 = error code 1
-    /* 7  */ encodeJX   (10, false),               // jump to WRITE_RESULT [10]
+    /* 7  */ encodeJX   (20, false),               // jump to WRITE_RESULT [10] (word 10 * 2 halfwords)
     /* 8  */ encodeNOP  (),                        // padding
     /* 9  */ encodeORIX (6, 0xDEADu, false),       // PASS: r6 = 0xDEAD
     /* 10 */ encodeORIX (8, 0xFF00u, false),       // r8 = ROM_DONE_ADDR (0xFF00)
-    /* 11 */ encodeSW   (6, 8, 1),                 // Mem[r8+1] = r6  → ROM_RESULT_ADDR
+    /* 11 */ encodeSW   (6, 8, 4),                 // Mem[r8+4] = r6  → ROM_RESULT_ADDR
     /* 12 */ encodeADDIX(7, 1, false),             // r7 = 1 (done flag)
     /* 13 */ encodeSW   (7, 8, 0),                 // Mem[r8+0] = r7  → ROM_DONE_ADDR
-    /* 14 */ encodeJX   (14, false),               // halt: branch to self
+    /* 14 */ encodeJX   (28, false),               // halt: branch to self (word 14 * 2)
 };
 
 TEST_F(ROMFixture, ANDX_SmokeROM_Passes)
@@ -83,16 +84,16 @@ TEST_F(ROMFixture, ANDX_SmokeROM_FailsWithWrongExpected)
         /* 2  */ encodeANDX (3, 1, 2, true),
         /* 3  */ encodeADDIX(4, 0x0001, false),    // WRONG expected → fail path
         /* 4  */ encodeSUBX (5, 3, 4, true),
-        /* 5  */ encodeBCOND(4, 4),
+        /* 5  */ encodeBCOND(4, 8),
         /* 6  */ encodeADDIX(6, 1, false),
-        /* 7  */ encodeJX   (10, false),
+        /* 7  */ encodeJX   (20, false),
         /* 8  */ encodeNOP  (),
         /* 9  */ encodeORIX (6, 0xDEADu, false),
         /* 10 */ encodeORIX (8, 0xFF00u, false),
-        /* 11 */ encodeSW   (6, 8, 1),
+        /* 11 */ encodeSW   (6, 8, 4),
         /* 12 */ encodeADDIX(7, 1, false),
         /* 13 */ encodeSW   (7, 8, 0),
-        /* 14 */ encodeJX   (14, false),
+        /* 14 */ encodeJX   (28, false),
     };
     runROM(mutated_rom, std::size(mutated_rom));
     EXPECT_FALSE(romPassed());

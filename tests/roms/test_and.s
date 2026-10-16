@@ -32,9 +32,13 @@
  *   write 1 to ROM_DONE_ADDR and loop forever.
  *
  * ROM protocol (matches ROMFixture in test_helpers.h):
- *   ROM_DONE_ADDR   = 0xFF00  (word address)
- *   ROM_RESULT_ADDR = 0xFF01  (word address)
+ *   ROM_DONE_ADDR   = 0xFF00  (byte address)
+ *   ROM_RESULT_ADDR = 0xFF04  (byte address)
  *   PASS_VALUE      = 0xDEAD
+ *
+ * pc is a real byte address; every instruction below is the 32-bit (4-byte)
+ * form, and beq_e/j_e displacements are halfword-granular (disp<<1) per
+ * s_core7.pdf, so each word-index N below is encoded as disp/addr = 2*N.
  *
  * Word layout:
  *   [0]  addi_e r1, 0x0F0F       r1 = 0x0F0F
@@ -42,16 +46,16 @@
  *   [2]  and.c  r3, r1, r2       r3 = r1 & r2 = 0x000F; sets flags
  *   [3]  addi_e r4, 0x000F       r4 = expected result
  *   [4]  sub_c_e r5, r3, r4      r5 = r3 - r4; Z=1 if equal
- *   [5]  beq_e 4                 if Z: jump to [9]  (pc_after_fetch=6; 6-1+4=9)
+ *   [5]  beq_e 8                 if Z: jump to [9]  (pc_after_fetch=20; 20-4+8*2=36=[9]*4)
  *   [6]  addi_e r6, 1            FAIL: r6 = error code 1
- *   [7]  j_e 10                  jump to WRITE_RESULT [10]
+ *   [7]  j_e 20                  jump to WRITE_RESULT [10] (= 10*2)
  *   [8]  nop                     padding
  *   [9]  ori_e r6, 0xDEAD        PASS: r6 = PASS_VALUE
  *  [10]  ori_e r8, 0xFF00        r8 = ROM_DONE_ADDR base
- *  [11]  sw_e  r6, r8, 1         Mem[r8+1] = r6 → ROM_RESULT_ADDR (0xFF01)
+ *  [11]  sw_e  r6, r8, 4         Mem[r8+4] = r6 → ROM_RESULT_ADDR (0xFF04)
  *  [12]  addi_e r7, 1            r7 = done flag (1)
  *  [13]  sw_e  r7, r8, 0         Mem[r8+0] = r7 → ROM_DONE_ADDR (0xFF00)
- *  [14]  j_e 14                  HALT: infinite loop (jumps to self)
+ *  [14]  j_e 28                  HALT: infinite loop (jumps to self, = 14*2)
  */
 
 .include "emul_score7.inc"
@@ -69,11 +73,11 @@
     /* ── Compare result against expected ────────────────────────── */
     addi_e   4, 0x000F          /* [emulator] r4 = expected = 0x000F   [3] */
     sub_c_e  5, 3, 4            /* [emulator] r5 = r3 - r4; Z=1 if ==  [4] */
-    beq_e    4                  /* [emulator] Z set → jump to [9]      [5] */
+    beq_e    8                  /* [emulator] Z set → jump to [9]      [5] */
 
     /* ── FAIL path ───────────────────────────────────────────────── */
     addi_e   6, 1               /* [emulator] r6 = error code 1        [6] */
-    j_e      10                 /* [emulator] jump to WRITE_RESULT     [7] */
+    j_e      20                 /* [emulator] jump to WRITE_RESULT     [7] */
     nop                         /* [real GAS] padding                  [8] */
 
     /* ── PASS path [9] ───────────────────────────────────────────── */
@@ -81,9 +85,9 @@
 
     /* ── Write result and signal done [10] ──────────────────────── */
     ori_e    8, 0xFF00          /* [emulator] r8 = 0xFF00             [10] */
-    sw_e     6, 8, 1            /* [emulator] Mem[r8+1]=r6 →RESULT    [11] */
+    sw_e     6, 8, 4            /* [emulator] Mem[r8+4]=r6 →RESULT    [11] */
     addi_e   7, 1               /* [emulator] r7 = done flag = 1      [12] */
     sw_e     7, 8, 0            /* [emulator] Mem[r8+0]=r7 → DONE     [13] */
 
     /* ── HALT [14] ───────────────────────────────────────────────── */
-    j_e      14                 /* [emulator] infinite loop           [14] */
+    j_e      28                 /* [emulator] infinite loop           [14] */
