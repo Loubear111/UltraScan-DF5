@@ -29,7 +29,9 @@
     .long (0x80000000 | (0x02 << 26) | (((\wa) & 0xFFFFFF) << 1))
 .endm
 
-/* beq_e: 32-bit BCOND opcode=0x18, bc=4 (EQ), signed disp. */
+/* beq_e: 32-bit BCOND opcode=0x04 (confirmed via score-elf-as; see
+ * /memories/session/phase2-isa-audit.md), bc=4 (EQ), split 19-bit disp:
+ * Disp[18:9] at bits24:15, Disp[8:0] at bits9:1. */
 .macro beq_e disp
-    .long (0x80000000 | (0x18 << 26) | (4 << 22) | (((\disp) & 0x1FFFFF) << 1))
+    .long (0x80000000 | (0x04 << 26) | ((((\disp) >> 9) & 0x3FF) << 15) | (4 << 10) | (((\disp) & 0x1FF) << 1))
 .endm

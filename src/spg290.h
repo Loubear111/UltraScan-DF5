@@ -165,11 +165,16 @@ private:
 		F6_SUBX   = 0x0A,  // sub    (was 0x03)
 		F6_SUBCX  = 0x0B,  // subc   (was 0x04)
 		F6_NEGX   = 0x0F,  // neg    (was 0x05)
-		F6_CMP    = 0x06,  // TODO: real encoding unknown, no conflict
-		F6_CMPZ   = 0x07,  // TODO: real encoding unknown, no conflict
-		F6_MVCOND = 0x26,  // TODO: unknown (was 0x08, conflicted with ADDX)
-		F6_REM    = 0x27,  // TODO: unknown (was 0x0A, conflicted with SUBX)
-		F6_REMU   = 0x28,  // TODO: unknown (was 0x0B, conflicted with SUBCX)
+		F6_CMP    = 0x06,  // cmp.c   CONFIRMED real value is 0x0C via score-elf-as, but that
+		                   // collides with the (not-yet-audited) HWMAC/CE family's F6_MAD
+		                   // at the same slot -- kept at this placeholder until that family
+		                   // is moved to its real opcode (0x1C). See /memories/session/phase2-isa-audit.md.
+		F6_CMPZ   = 0x07,  // cmpz.c  CONFIRMED real value is 0x0D; blocked by F6_MADU, same as above.
+		F6_MVCOND = 0x26,  // mv/mvcond CONFIRMED real value is 0x2B; blocked by F6_ADDS, same as above.
+		F6_REM    = 0x27,  // TODO: unknown; likely not a real distinct instruction (REM/REMU look
+		                   // like div+mfceh in practice -- no mnemonic found via score-elf-as)
+		F6_REMU   = 0x2A,  // TODO: unknown, same caveat as F6_REM (was 0x28, moved to avoid
+		                   // colliding with the now-confirmed F6_MFSR)
 		F6_MAD    = 0x0C,  // HWMAC sub-field (not R-type dispatch)
 		F6_MADU   = 0x0D,  // HWMAC sub-field
 		F6_MSB    = 0x0E,  // HWMAC sub-field
@@ -178,13 +183,13 @@ private:
 		F6_ORX    = 0x11,  // or               confirmed
 		F6_NOTX   = 0x12,  // not    (was 0x13, swapped with XOR)
 		F6_XORX   = 0x13,  // xor    (was 0x12, swapped with NOT)
-		F6_BITTSTC= 0x14,  // TODO: real encoding unknown, no conflict
+		F6_BITTSTC= 0x14,  // bittst.c CONFIRMED real value is 0x16; blocked by F6_MADF, see above.
 		F6_MULF   = 0x15,  // HWMAC sub-field (TODO: confirm)
 		F6_MADF   = 0x16,  // HWMAC sub-field (TODO: confirm)
-		F6_ROLC   = 0x17,  // rolc.c  TODO: unknown, no conflict
-		F6_ROLIC  = 0x29,  // rolic.c TODO: unknown (was 0x18, conflicted with SLLX)
-		F6_RORC   = 0x19,  // rorc.c  TODO: unknown, no conflict
-		F6_RORIC  = 0x2A,  // roric.c TODO: unknown (was 0x1A, conflicted with SRLX)
+		F6_ROLC   = 0x17,  // rolc.c  CONFIRMED real value is 0x1F; blocked by F6_MSBF, see above.
+		F6_ROLIC  = 0x3F,  // rolic.c CONFIRMED via score-elf-as (no collision)
+		F6_RORC   = 0x19,  // rorc.c  CONFIRMED real value is 0x1D; blocked by F6_ABSS, see above.
+		F6_RORIC  = 0x3D,  // roric.c CONFIRMED via score-elf-as (no collision)
 		// Saturating/fractional live in OP_HWMAC — kept as aliases for HWMAC dispatch.
 		F6_ADDS   = 0x2B,  // add.s → HWMAC (was 0x1B, conflicted with SRAX)
 		F6_SUBS   = 0x30,  // sub.s → HWMAC (was 0x1C, conflicted with RORX)
@@ -223,6 +228,14 @@ private:
 		F6_MTCEH  = 0x25,  // mtceh  same func6 as MTCEL (was 0x09)
 		// MSBU shares 0x0F with NEGX; moved to 0x32
 		F6_MSBU   = 0x32,  // msbu HWMAC sub-field (was 0x0F, conflicted with NEGX)
+		// Confirmed via score-elf-as: these were previously only reachable through the
+		// (wrong) OP_SYS=0x1F sub-op scheme; real hardware dispatches them as ordinary
+		// R-type instructions at opcode 0. The OP_SYS paths are left in place (unused
+		// by real encodings, but harmless) since other OP_SYS sub-ops are still unaudited.
+		F6_SYSCALL= 0x01,  // syscall CONFIRMED
+		F6_TRAPCOND=0x02,  // trap{cond} CONFIRMED (rB&0xF = EC, rA = Imm5 software parameter)
+		F6_MFSR   = 0x28,  // mfsr CONFIRMED (rD = dest, rA = srn)
+		F6_MTSR   = 0x29,  // mtsr CONFIRMED (rA = source, rD = srn -- opposite of mfsr's rD/rA roles)
 	};
 
 	// Opcode field (bits 30:26). Values confirmed from score-elf-as unless TODO.
@@ -246,9 +259,11 @@ private:
 		OP_SH       = 0x15,  // sh   (was OP_LH=0x15)
 		OP_LBU      = 0x16,  // lbu  (was OP_SB=0x16)
 		OP_SB       = 0x17,  // sb   (was OP_SH=0x17)
-		// Control flow
-		OP_BCOND    = 0x18,   // BC[25:22], signed Disp[21:1]
-		OP_BR       = 0x1A,   // BC[25:22], rA[20:16]
+		// Control flow. b{cond} and b{cond}l share ONE real opcode (confirmed via
+		// score-elf-as); the link variant is selected by the CU bit (bit 0), same
+		// as every other CU-suffixed instruction -- there is no separate OP_BCONDL.
+		OP_BCOND    = 0x04,   // BC[13:10], split Disp[18:9]|Disp[8:0] (see BCOND())
+		OP_BR       = 0x1A,   // BC[25:22], rA[20:16]  -- NOT re-verified this pass
 		// Pre/post-index load/store family. rD[25:21], rA[20:16],
 		// sub-op[15:13] (0=lw,1=sw,2=lbu,3=lb,4=lhu,5=lh,6=sb,7=sh),
 		// signed Imm12[12:1], pre-index flag at bit 0 (1=pre, 0=post).
@@ -257,8 +272,7 @@ private:
 		// HZFSU control field in bits [25:21] (H=high half, Z=zero start,
 		// F=fractional, S=subtract, U=unsigned).
 		OP_HWMAC    = 0x1C,
-		OP_BCONDL   = 0x1D,   // b{cond}l : BCOND + link r3
-		OP_BRL      = 0x1E,   // br{cond}l: BR + link r3
+		OP_BRL      = 0x1E,   // br{cond}l: BR + link r3 -- NOT re-verified this pass
 		// System / coprocessor register moves. The last available opcode is
 		// shared by the whole group; the specific operation is chosen by a
 		// 5-bit sub-op field in bits 14:10 (see SYS_SUBOP).
@@ -324,9 +338,17 @@ private:
 		F3_ADDISX = 0x0,  // addis  (was F3_ADDISX=6 under OP_ITYPE1)
 		F3_ANDISX = 0x4,  // andis  (was F3_ANDISX=5 under OP_ITYPE1)
 		F3_ORISX  = 0x5,  // oris   (was F3_ORISX=7 under OP_ITYPE1)
+		F3_LDISX  = 0x6,  // ldis   CONFIRMED via score-elf-as: real ldis is OP_ITYPE_S
+		                  // func3=6 (parallels ldi's func3=6 under OP_ITYPE1), NOT the
+		                  // separate OP_ITYPE2 placeholder opcode below.
 	};
 
-	// func3 within OP_ITYPE2 (opcode 0x03: placeholder — real opcodes TODO)
+	// func3 within OP_ITYPE2 (opcode 0x03: placeholder, kept for backward
+	// compatibility). subi/subis/subri are NOT real instructions -- confirmed via
+	// score-elf-as that GAS silently expands them to addi/addri with a negated
+	// immediate, so there is no real opcode to find for F3_SUBIX/F3_SUBISX. This
+	// whole opcode slot is an emulator-only convention now superseded by
+	// F3_LDISX above for ldis; left in place since existing tests still use it.
 	enum FUNC3_I2
 	{
 		F3_LDIS   = 0x0,

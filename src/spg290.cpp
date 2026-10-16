@@ -159,12 +159,28 @@ void spg290::clock()
 			case F6_MULU:    MULU();    break;
 			case F6_DIV:     DIV();     break;
 			case F6_DIVU:    DIVU();    break;
-			case F6_MFCEL:  // 0x24: covers both MFCEL and MFCEH (rB=1 vs rB=2)
-				if (((instr & 0x7C00) >> 10) == 2) MFCEH(); else MFCEL();
+			case F6_MFCEL:  // 0x24: covers mfcel/mfceh/mfcehl (rB=1/2/3)
+				if (((instr & 0x7C00) >> 10) == 2) MFCEH();
+				else if (((instr & 0x7C00) >> 10) == 3)
+				{
+					uint8_t d_reg = (instr & 0x3E00000) >> 21;
+					uint8_t a_reg = (instr & 0x1F0000) >> 16;
+					writeReg(d_reg, ceh);
+					writeReg(a_reg, cel);
+				}
+				else MFCEL();
 				break;
 			// case F6_MFCEH: — same value as F6_MFCEL; handled above.
-			case F6_MTCEL:  // 0x25: covers both MTCEL and MTCEH (rB=1 vs rB=2)
-				if (((instr & 0x7C00) >> 10) == 2) MTCEH(); else MTCEL();
+			case F6_MTCEL:  // 0x25: covers mtcel/mtceh/mtcehl (rB=1/2/3)
+				if (((instr & 0x7C00) >> 10) == 2) MTCEH();
+				else if (((instr & 0x7C00) >> 10) == 3)
+				{
+					uint8_t d_reg = (instr & 0x3E00000) >> 21;
+					uint8_t a_reg = (instr & 0x1F0000) >> 16;
+					ceh = regs[d_reg];
+					cel = regs[a_reg];
+				}
+				else MTCEL();
 				break;
 			// case F6_MTCEH: — same value as F6_MTCEL; handled above.
 			case F6_MAD:     MAD();     break;
@@ -173,6 +189,13 @@ void spg290::clock()
 			case F6_MSBU:    MSBU();    break;  // 0x32 (was 0x0F, moved to avoid conflict)
 			case F6_MULF:    MULF();    break;
 			case F6_MADF:    MADF();    break;
+			// Confirmed via score-elf-as: these are ordinary R-type instructions,
+			// not OP_SYS sub-ops (the OP_SYS=0x1F dispatch for them is kept but is
+			// now dead code from a real-ROM's perspective; see spg290.h).
+			case F6_SYSCALL: SYSCALL();   break;
+			case F6_TRAPCOND:TRAPCOND();  break;
+			case F6_MFSR:    MFSR();      break;
+			case F6_MTSR:    MTSR();      break;
 			default: break;
 			}
 			break;
@@ -191,7 +214,7 @@ void spg290::clock()
 			}
 			break;
 		}
-		case OP_ITYPE_S:  // opcode=5: shifted-immediate (addis/andis/oris)
+		case OP_ITYPE_S:  // opcode=5: shifted-immediate (addis/andis/oris/ldis)
 		{
 			uint8_t func3 = (instr & func3_MASK) >> 18;
 			switch (func3)
@@ -199,6 +222,7 @@ void spg290::clock()
 			case F3_ADDISX: ADDISX(); break;  // addis: func3=0
 			case F3_ANDISX: ANDISX(); break;  // andis: func3=4
 			case F3_ORISX:  ORISX();  break;  // oris:  func3=5
+			case F3_LDISX:  LDIS();   break;  // ldis:  func3=6, confirmed via score-elf-as
 			default: break;
 			}
 			break;
@@ -227,10 +251,10 @@ void spg290::clock()
 		case OP_LH:     LH();     break;
 		case OP_SB:     SB();     break;
 		case OP_SH:     SH();     break;
-		case OP_BCOND:  BCOND();  break;
+		// b{cond} and b{cond}l share one opcode; CU bit (LK) selects the link form.
+		case OP_BCOND:  if (instr & CU_MASK) BCONDL(); else BCOND(); break;
 		case OP_JX:     JX();     break;
 		case OP_BR:     BR();     break;
-		case OP_BCONDL: BCONDL(); break;
 		case OP_BRL:    BRL();    break;
 		case OP_LSU_UPD:LSU_UPD();break;
 		case OP_HWMAC:  HWMAC();  break;
@@ -1602,15 +1626,27 @@ uint8_t spg290::SH()
 // ---- Control flow --------------------------------------------------
 // pc is now a real byte address, already advanced past the current
 // instruction by the time these execute, so PCcurrent == (pc - instrSize).
-// Per the S+core7 spec the displacement fields count halfwords, so the
-// final byte offset is disp<<1 (confirmed from s_core7.pdf's BC-form and
-// J-form "PC = PCcurrent + SignExtend({Disp, 1'b0})" operations).
+//
+// BC-form bit layout (opcode 0x04, confirmed empirically via score-elf-as --
+// brute-force fit against known branch targets, documented in
+// /memories/session/phase2-isa-audit.md): bits24:15 = Disp[18:9], bit14 =
+// reserved, bits13:10 = BC (condition code), bits9:1 = Disp[8:0], bit0 = CU
+// (0=b{cond}, 1=b{cond}l). The two displacement halves concatenate into a
+// 19-bit signed halfword count; the final byte offset is disp<<1, added to
+// PCcurrent (confirmed from s_core7.pdf's "PC = PCcurrent + SignExtend({Disp,
+// 1'b0})" operation).
+static inline int32_t decodeBCondDisp19(uint32_t instr)
+{
+    uint32_t hi = (instr >> 15) & 0x3FFu;   // bits 24:15
+    uint32_t lo = (instr >> 1) & 0x1FFu;    // bits 9:1
+    int32_t disp = (int32_t)((hi << 9) | lo);
+    return (disp << 13) >> 13;               // sign-extend 19 bits
+}
 
 uint8_t spg290::BCOND()
 {
-    uint8_t bc   = (instr >> 22) & 0xF;
-    int32_t disp = (instr >> 1) & 0x1FFFFF;        // 21-bit signed displacement
-    disp = (disp << 11) >> 11;                     // sign-extend
+    uint8_t bc   = (instr >> 10) & 0xF;
+    int32_t disp = decodeBCondDisp19(instr);
 
     if (evalCondition(bc))
         pc = (pc - instrSize) + (uint32_t)(disp << 1);
@@ -1644,9 +1680,8 @@ uint8_t spg290::BR()
 
 uint8_t spg290::BCONDL()
 {
-    uint8_t bc   = (instr >> 22) & 0xF;
-    int32_t disp = (instr >> 1) & 0x1FFFFF;        // 21-bit signed displacement
-    disp = (disp << 11) >> 11;                     // sign-extend
+    uint8_t bc   = (instr >> 10) & 0xF;
+    int32_t disp = decodeBCondDisp19(instr);
 
     // Link register r3 = address of the following instruction (pc already
     // advanced). The link is always written, regardless of the condition.
@@ -2219,8 +2254,11 @@ uint8_t spg290::MFSR()
 
 uint8_t spg290::MTSR()
 {
-    uint8_t a_reg  = (instr & 0x3E00000) >> 21;   // mtsr names its source rA
-    uint8_t regnum = (instr & 0x1F0000) >> 16;
+    // Confirmed via score-elf-as: the source GPR is in the rA field (20:16)
+    // and the special-register number is in the rD field (25:21) -- the
+    // opposite role split from mfsr's rD=dest/rA=regnum.
+    uint8_t regnum = (instr & 0x3E00000) >> 21;
+    uint8_t a_reg  = (instr & 0x1F0000) >> 16;
     sr[regnum] = regs[a_reg];
     return 1;
 }
@@ -2323,11 +2361,12 @@ void spg290::raiseException(uint8_t code)
 
 // trap{cond}: raise a trap exception when the condition holds, otherwise it is
 // a no-op. EC=14 is defined as "no operation" and evalCondition() returns false
-// for it, which matches that behaviour.
+// for it, which matches that behaviour. EC lives in the rB field (confirmed via
+// score-elf-as); rA carries an unused software parameter (Imm5).
 uint8_t spg290::TRAPCOND()
 {
-    uint8_t ec = (instr >> 16) & 0xF;
-    if (evalCondition(ec))
+    uint8_t ec = (instr & 0x7C00) >> 10;
+    if (evalCondition(ec & 0xF))
         raiseException(EXC_TRAP);
     return 1;
 }

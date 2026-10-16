@@ -194,23 +194,28 @@ enum : uint32_t {
     EF6_NOP=0x00,
     // Arithmetic (confirmed)
     EF6_ADDX=0x08, EF6_ADDCX=0x09, EF6_SUBX=0x0A, EF6_SUBCX=0x0B, EF6_NEGX=0x0F,
-    // TODO unknowns (placeholder values in valid 6-bit range)
-    EF6_CMP=0x06, EF6_CMPZ=0x07, EF6_MVCOND=0x26, EF6_REM=0x27, EF6_REMU=0x28,
+    // TODO unknowns (placeholder values in valid 6-bit range; real values confirmed
+    // via score-elf-as but blocked by collisions with the un-audited HWMAC/CE family
+    // -- see /memories/session/phase2-isa-audit.md)
+    EF6_CMP=0x06, EF6_CMPZ=0x07, EF6_MVCOND=0x26, EF6_REM=0x27, EF6_REMU=0x2A,
     // Bitwise (confirmed)
     EF6_ANDX=0x10, EF6_ORX=0x11, EF6_NOTX=0x12, EF6_XORX=0x13,
-    // TODO unknown
+    // TODO unknown (see note above)
     EF6_BITTSTC=0x14,
     // Shifts/rotates (confirmed)
     EF6_SLLX=0x18, EF6_SRLX=0x1A, EF6_SRAX=0x1B, EF6_ROLX=0x1E, EF6_RORX=0x1C,
     EF6_SLLIX=0x38, EF6_SRLIX=0x3A, EF6_SRAIX=0x3B, EF6_ROLIX=0x3E, EF6_RORIX=0x3C,
-    // TODO rotate-through-carry (placeholder values in valid 6-bit range)
-    EF6_ROLC=0x17, EF6_ROLIC=0x29, EF6_RORC=0x19, EF6_RORIC=0x2A,
+    // rotate-through-carry: ROLIC/RORIC confirmed via score-elf-as; ROLC/RORC's real
+    // values collide with the un-audited HWMAC/CE family, kept as placeholders.
+    EF6_ROLC=0x17, EF6_ROLIC=0x3F, EF6_RORC=0x19, EF6_RORIC=0x3D,
     // Extend (confirmed)
     EF6_EXTSBX=0x2C, EF6_EXTSHX=0x2D, EF6_EXTZBX=0x2E, EF6_EXTZHX=0x2F,
     // Multiply/divide (confirmed)
     EF6_MUL=0x20, EF6_MULU=0x21, EF6_DIV=0x22, EF6_DIVU=0x23,
-    // CE register moves (confirmed; rB=1 for CEL, rB=2 for CEH)
+    // CE register moves (confirmed; rB=1 for CEL, rB=2 for CEH, rB=3 for both)
     EF6_MFCEL=0x24, EF6_MFCEH=0x24, EF6_MTCEL=0x25, EF6_MTCEH=0x25,
+    // Confirmed real R-type instructions (previously only reachable via OP_SYS)
+    EF6_SYSCALL=0x01, EF6_TRAPCOND=0x02, EF6_MFSR=0x28, EF6_MTSR=0x29,
     // HWMAC sub-fields (opcode 0x1C, not R-type)
     EF6_MAD=0x0C, EF6_MADU=0x0D, EF6_MSB=0x0E, EF6_MSBU=0x32,
     // Saturating/misc → HWMAC, placeholders in valid 6-bit range
@@ -302,7 +307,9 @@ static inline uint32_t encodeORIX(uint8_t d, uint16_t imm16, bool cu) { return e
 static inline uint32_t encodeORISX(uint8_t d, uint16_t imm16, bool cu) { return encIS(5, d, imm16, cu); }  // oris opcode=5 func3=5
 static inline uint32_t encodeCMPI(uint8_t d, uint16_t imm16) { return encI1(2, d, imm16, true); }
 static inline uint32_t encodeLDI(uint8_t d, uint16_t imm16) { return encI1(6, d, imm16, false); }  // ldi opcode=1 func3=6
-static inline uint32_t encodeLDIS(uint8_t d, uint16_t imm16) { return encI2(0, d, imm16, false); }
+// ldis: confirmed via score-elf-as to be OP_ITYPE_S func3=6 (opcode 5), not the
+// OP_ITYPE2 placeholder opcode.
+static inline uint32_t encodeLDIS(uint8_t d, uint16_t imm16) { return encIS(6, d, imm16, false); }
 static inline uint32_t encodeSUBIX(uint8_t d, uint16_t imm16, bool cu) { return encI2(1, d, imm16, cu); }
 static inline uint32_t encodeSUBISX(uint8_t d, uint16_t imm16, bool cu) { return encI2(2, d, imm16, cu); }
 static inline uint32_t encodeORRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu) { return encRIX(0x0D, d, a, imm14, cu); }  // orri opcode=0x0D
@@ -370,12 +377,22 @@ static inline uint32_t encodeLBU(uint8_t d, uint8_t a, uint16_t imm) { return en
 static inline uint32_t encodeSB(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x17, d, a, imm); }  // OP_SB=0x17 (was 0x16)
 
 // --- Control flow ---
-static inline uint32_t encodeBCOND(uint8_t bc, int32_t disp)
+// b{cond}/b{cond}l share one real opcode (0x04); CU bit selects the link
+// form. BC at bits13:10, split 19-bit displacement (Disp[18:9] at bits24:15,
+// Disp[8:0] at bits9:1) -- confirmed via score-elf-as, see spg290.cpp.
+static inline uint32_t encodeBC(uint8_t bc, int32_t disp19, bool link)
 {
-    return 0x80000000u | (0x18u << 26)
-         | ((uint32_t)(bc & 0xF) << 22)
-         | (((uint32_t)disp & 0x1FFFFF) << 1);
+    uint32_t d = (uint32_t)disp19 & 0x7FFFF;
+    uint32_t hi = (d >> 9) & 0x3FF;
+    uint32_t lo = d & 0x1FF;
+    return 0x80000000u | (0x04u << 26)
+         | (hi << 15)
+         | ((uint32_t)(bc & 0xF) << 10)
+         | (lo << 1)
+         | (link ? 1u : 0u);
 }
+static inline uint32_t encodeBCOND(uint8_t bc, int32_t disp)  { return encodeBC(bc, disp, false); }
+static inline uint32_t encodeBCONDL(uint8_t bc, int32_t disp) { return encodeBC(bc, disp, true); }
 static inline uint32_t encodeJX(uint32_t disp24, bool lk)
 {
     return 0x80000000u | (0x02u << 26)  // OP_JX=0x02 (was 0x19)
@@ -387,12 +404,6 @@ static inline uint32_t encodeBR(uint8_t bc, uint8_t a)
     return 0x80000000u | (0x1Au << 26)
          | ((uint32_t)(bc & 0xF) << 22)
          | ((uint32_t)(a & 0x1F) << 16);
-}
-static inline uint32_t encodeBCONDL(uint8_t bc, int32_t disp)
-{
-    return 0x80000000u | (0x1Du << 26)
-         | ((uint32_t)(bc & 0xF) << 22)
-         | (((uint32_t)disp & 0x1FFFFF) << 1);
 }
 static inline uint32_t encodeBRL(uint8_t bc, uint8_t a)
 {
@@ -619,8 +630,11 @@ static inline uint32_t encSYS(uint8_t sub, uint8_t d, uint8_t regnum, uint8_t cp
 }
 static inline uint32_t encodeMFCR(uint8_t d, uint8_t crn)  { return encSYS(0x00, d, crn, 0); }
 static inline uint32_t encodeMTCR(uint8_t d, uint8_t crn)  { return encSYS(0x01, d, crn, 0); }
-static inline uint32_t encodeMFSR(uint8_t d, uint8_t srn)  { return encSYS(0x02, d, srn, 0); }
-static inline uint32_t encodeMTSR(uint8_t a, uint8_t srn)  { return encSYS(0x03, a, srn, 0); }
+// mfsr/mtsr: confirmed via score-elf-as to be ordinary R-type instructions
+// (func6 0x28/0x29), not OP_SYS sub-ops -- see spg290.h. mtsr's rD/rA roles
+// are swapped relative to mfsr (rD=srn, rA=source register).
+static inline uint32_t encodeMFSR(uint8_t d, uint8_t srn)  { return encR(0x28, d, srn, 0, false); }
+static inline uint32_t encodeMTSR(uint8_t a, uint8_t srn)  { return encR(0x29, srn, a, 0, false); }
 static inline uint32_t encodeMFCX(uint8_t d, uint8_t crn, uint8_t cp)  { return encSYS(0x04, d, crn, cp); }
 static inline uint32_t encodeMTCX(uint8_t d, uint8_t crn, uint8_t cp)  { return encSYS(0x05, d, crn, cp); }
 static inline uint32_t encodeMFCCX(uint8_t d, uint8_t crn, uint8_t cp) { return encSYS(0x06, d, crn, cp); }
@@ -629,10 +643,12 @@ static inline uint32_t encodeMTCCX(uint8_t d, uint8_t crn, uint8_t cp) { return 
 static inline uint32_t encodeMFCEX(uint8_t d, uint8_t a, uint8_t hilo) { return encSYS(0x08, d, a, hilo); }
 static inline uint32_t encodeMTCEX(uint8_t d, uint8_t a, uint8_t hilo) { return encSYS(0x09, d, a, hilo); }
 static inline uint32_t encodeCOPX() { return encSYS(0x0A, 0, 0, 0); }
-// t{cond} / trap{cond}: EC occupies the regnum field (bits 20:16).
+// t{cond}: EC occupies the regnum field (bits 20:16) -- NOT re-verified this pass.
 static inline uint32_t encodeTCOND(uint8_t ec)    { return encSYS(0x0B, 0, ec, 0); }
-static inline uint32_t encodeTRAPCOND(uint8_t ec) { return encSYS(0x0C, 0, ec, 0); }
-static inline uint32_t encodeSYSCALL()            { return encSYS(0x0D, 0, 0, 0); }
+// trap{cond}/syscall: confirmed via score-elf-as to be ordinary R-type instructions
+// (func6 0x02/0x01), not OP_SYS sub-ops. trap{cond}'s EC lives in the rB field.
+static inline uint32_t encodeTRAPCOND(uint8_t ec) { return encR(0x02, 0, 0, ec, false); }
+static inline uint32_t encodeSYSCALL()            { return encR(0x01, 0, 0, 0, false); }
 static inline uint32_t encodeRTE()                { return encSYS(0x0E, 0, 0, 0); }
 static inline uint32_t encodeDRTE()               { return encSYS(0x0F, 0, 0, 0); }
 static inline uint32_t encodeSLEEP()              { return encSYS(0x10, 0, 0, 0); }
