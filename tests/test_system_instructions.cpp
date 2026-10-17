@@ -131,5 +131,5 @@ TEST_F(CPUFixture, COPX_HasNoArchitecturalEffect)
     setReg(4, 0x12345678u);
     execute(encodeCOPX());
     EXPECT_EQ(getReg(4), 0x12345678u);
-    EXPECT_EQ(bus.cpu.pc, 1u);
+    EXPECT_EQ(bus.cpu.pc, 4u);
 }

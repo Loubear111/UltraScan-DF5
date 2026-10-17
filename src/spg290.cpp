@@ -13,14 +13,34 @@ spg290::~spg290()
 {
 }
 
-uint32_t spg290::read(uint16_t a)
+uint8_t spg290::readByte(uint32_t a)
 {
-	return bus->read(a, false);
+	return bus->read8(a);
 }
 
-void spg290::write(uint16_t a, uint32_t d)
+void spg290::writeByte(uint32_t a, uint8_t d)
 {
-	bus->write(a, d);
+	bus->write8(a, d);
+}
+
+uint16_t spg290::readHalf(uint32_t a)
+{
+	return bus->read16(a);
+}
+
+void spg290::writeHalf(uint32_t a, uint16_t d)
+{
+	bus->write16(a, d);
+}
+
+uint32_t spg290::readWord(uint32_t a)
+{
+	return bus->read32(a);
+}
+
+void spg290::writeWord(uint32_t a, uint32_t d)
+{
+	bus->write32(a, d);
 }
 
 void spg290::writeReg(uint8_t r, uint32_t val)
@@ -48,8 +68,25 @@ void spg290::clock()
 {
 	if (cycles == 0)
 	{
-		instr = read(pc);
-		pc++;
+		// Fetch one halfword at a time: Score7 instructions are 16-bit or
+		// 32-bit, byte-addressed and packed at their natural size (not one
+		// fixed-width slot per instruction). The halfword's own MSB is the
+		// "P-bit": 1 starts a 32-bit instruction (fetch the halfword that
+		// follows too), 0 means it is itself a complete 16-bit instruction.
+		uint16_t hi = readHalf(pc);
+		if (hi & 0x8000u)
+		{
+			uint16_t lo = readHalf(pc + 2);
+			instr = ((uint32_t)hi << 16) | lo;
+			instrSize = 4;
+			pc += 4;
+		}
+		else
+		{
+			instr = hi;   // decode16() reads this back out of the low 16 bits
+			instrSize = 2;
+			pc += 2;
+		}
 
 		// Bit 31 is the 32-bit instruction indicator. When it is clear,
 		// the word holds a 16-bit ("!") instruction in its low 16 bits.
@@ -122,12 +159,28 @@ void spg290::clock()
 			case F6_MULU:    MULU();    break;
 			case F6_DIV:     DIV();     break;
 			case F6_DIVU:    DIVU();    break;
-			case F6_MFCEL:  // 0x24: covers both MFCEL and MFCEH (rB=1 vs rB=2)
-				if (((instr & 0x7C00) >> 10) == 2) MFCEH(); else MFCEL();
+			case F6_MFCEL:  // 0x24: covers mfcel/mfceh/mfcehl (rB=1/2/3)
+				if (((instr & 0x7C00) >> 10) == 2) MFCEH();
+				else if (((instr & 0x7C00) >> 10) == 3)
+				{
+					uint8_t d_reg = (instr & 0x3E00000) >> 21;
+					uint8_t a_reg = (instr & 0x1F0000) >> 16;
+					writeReg(d_reg, ceh);
+					writeReg(a_reg, cel);
+				}
+				else MFCEL();
 				break;
 			// case F6_MFCEH: — same value as F6_MFCEL; handled above.
-			case F6_MTCEL:  // 0x25: covers both MTCEL and MTCEH (rB=1 vs rB=2)
-				if (((instr & 0x7C00) >> 10) == 2) MTCEH(); else MTCEL();
+			case F6_MTCEL:  // 0x25: covers mtcel/mtceh/mtcehl (rB=1/2/3)
+				if (((instr & 0x7C00) >> 10) == 2) MTCEH();
+				else if (((instr & 0x7C00) >> 10) == 3)
+				{
+					uint8_t d_reg = (instr & 0x3E00000) >> 21;
+					uint8_t a_reg = (instr & 0x1F0000) >> 16;
+					ceh = regs[d_reg];
+					cel = regs[a_reg];
+				}
+				else MTCEL();
 				break;
 			// case F6_MTCEH: — same value as F6_MTCEL; handled above.
 			case F6_MAD:     MAD();     break;
@@ -136,6 +189,13 @@ void spg290::clock()
 			case F6_MSBU:    MSBU();    break;  // 0x32 (was 0x0F, moved to avoid conflict)
 			case F6_MULF:    MULF();    break;
 			case F6_MADF:    MADF();    break;
+			// Confirmed via score-elf-as: these are ordinary R-type instructions,
+			// not OP_SYS sub-ops (the OP_SYS=0x1F dispatch for them is kept but is
+			// now dead code from a real-ROM's perspective; see spg290.h).
+			case F6_SYSCALL: SYSCALL();   break;
+			case F6_TRAPCOND:TRAPCOND();  break;
+			case F6_MFSR:    MFSR();      break;
+			case F6_MTSR:    MTSR();      break;
 			default: break;
 			}
 			break;
@@ -154,7 +214,7 @@ void spg290::clock()
 			}
 			break;
 		}
-		case OP_ITYPE_S:  // opcode=5: shifted-immediate (addis/andis/oris)
+		case OP_ITYPE_S:  // opcode=5: shifted-immediate (addis/andis/oris/ldis)
 		{
 			uint8_t func3 = (instr & func3_MASK) >> 18;
 			switch (func3)
@@ -162,6 +222,7 @@ void spg290::clock()
 			case F3_ADDISX: ADDISX(); break;  // addis: func3=0
 			case F3_ANDISX: ANDISX(); break;  // andis: func3=4
 			case F3_ORISX:  ORISX();  break;  // oris:  func3=5
+			case F3_LDISX:  LDIS();   break;  // ldis:  func3=6, confirmed via score-elf-as
 			default: break;
 			}
 			break;
@@ -190,10 +251,10 @@ void spg290::clock()
 		case OP_LH:     LH();     break;
 		case OP_SB:     SB();     break;
 		case OP_SH:     SH();     break;
-		case OP_BCOND:  BCOND();  break;
+		// b{cond} and b{cond}l share one opcode; CU bit (LK) selects the link form.
+		case OP_BCOND:  if (instr & CU_MASK) BCONDL(); else BCOND(); break;
 		case OP_JX:     JX();     break;
 		case OP_BR:     BR();     break;
-		case OP_BCONDL: BCONDL(); break;
 		case OP_BRL:    BRL();    break;
 		case OP_LSU_UPD:LSU_UPD();break;
 		case OP_HWMAC:  HWMAC();  break;
@@ -1470,9 +1531,9 @@ uint8_t spg290::MADF()
 }
 
 // ---- Loads / stores ------------------------------------------------
-// The effective address is computed as GPRrA + sext(Imm15) and used as a
-// word index into the bus (this emulator models memory as a word array,
-// so byte/half accesses operate on the addressed word).
+// The effective address is GPRrA + sext(Imm15), a real 32-bit byte address
+// routed through the Bus; each access uses the accessor matching its own
+// size instead of reading a whole word and masking.
 
 uint8_t spg290::LW()
 {
@@ -1480,8 +1541,8 @@ uint8_t spg290::LW()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;                       // sign-extend 15-bit
-    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
-    writeReg(d_reg, read(addr));
+    uint32_t addr = regs[a_reg] + (uint32_t)imm;
+    writeReg(d_reg, readWord(addr));
     return 1;
 }
 
@@ -1491,8 +1552,8 @@ uint8_t spg290::SW()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
-    write(addr, regs[d_reg]);
+    uint32_t addr = regs[a_reg] + (uint32_t)imm;
+    writeWord(addr, regs[d_reg]);
     return 1;
 }
 
@@ -1502,8 +1563,8 @@ uint8_t spg290::LBU()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
-    writeReg(d_reg, read(addr) & 0xFF);
+    uint32_t addr = regs[a_reg] + (uint32_t)imm;
+    writeReg(d_reg, readByte(addr));
     return 1;
 }
 
@@ -1513,8 +1574,8 @@ uint8_t spg290::LB()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
-    writeReg(d_reg, (uint32_t)(int32_t)(int8_t)(read(addr) & 0xFF));
+    uint32_t addr = regs[a_reg] + (uint32_t)imm;
+    writeReg(d_reg, (uint32_t)(int32_t)(int8_t)readByte(addr));
     return 1;
 }
 
@@ -1524,8 +1585,8 @@ uint8_t spg290::LHU()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
-    writeReg(d_reg, read(addr) & 0xFFFF);
+    uint32_t addr = regs[a_reg] + (uint32_t)imm;
+    writeReg(d_reg, readHalf(addr));
     return 1;
 }
 
@@ -1535,8 +1596,8 @@ uint8_t spg290::LH()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
-    writeReg(d_reg, (uint32_t)(int32_t)(int16_t)(read(addr) & 0xFFFF));
+    uint32_t addr = regs[a_reg] + (uint32_t)imm;
+    writeReg(d_reg, (uint32_t)(int32_t)(int16_t)readHalf(addr));
     return 1;
 }
 
@@ -1546,9 +1607,8 @@ uint8_t spg290::SB()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
-    uint32_t word = (read(addr) & ~0xFFu) | (regs[d_reg] & 0xFFu);
-    write(addr, word);
+    uint32_t addr = regs[a_reg] + (uint32_t)imm;
+    writeByte(addr, (uint8_t)regs[d_reg]);
     return 1;
 }
 
@@ -1558,37 +1618,52 @@ uint8_t spg290::SH()
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
     int32_t imm   = (instr >> 1) & 0x7FFF;
     imm = (imm << 17) >> 17;
-    uint16_t addr = (uint16_t)(regs[a_reg] + (uint32_t)imm);
-    uint32_t word = (read(addr) & ~0xFFFFu) | (regs[d_reg] & 0xFFFFu);
-    write(addr, word);
+    uint32_t addr = regs[a_reg] + (uint32_t)imm;
+    writeHalf(addr, (uint16_t)regs[d_reg]);
     return 1;
 }
 
 // ---- Control flow --------------------------------------------------
-// pc is a word index; it has already been advanced past the current
-// instruction by the time these execute, so PCcurrent == (pc - 1).
+// pc is now a real byte address, already advanced past the current
+// instruction by the time these execute, so PCcurrent == (pc - instrSize).
+//
+// BC-form bit layout (opcode 0x04, confirmed empirically via score-elf-as --
+// brute-force fit against known branch targets, documented in
+// /memories/session/phase2-isa-audit.md): bits24:15 = Disp[18:9], bit14 =
+// reserved, bits13:10 = BC (condition code), bits9:1 = Disp[8:0], bit0 = CU
+// (0=b{cond}, 1=b{cond}l). The two displacement halves concatenate into a
+// 19-bit signed halfword count; the final byte offset is disp<<1, added to
+// PCcurrent (confirmed from s_core7.pdf's "PC = PCcurrent + SignExtend({Disp,
+// 1'b0})" operation).
+static inline int32_t decodeBCondDisp19(uint32_t instr)
+{
+    uint32_t hi = (instr >> 15) & 0x3FFu;   // bits 24:15
+    uint32_t lo = (instr >> 1) & 0x1FFu;    // bits 9:1
+    int32_t disp = (int32_t)((hi << 9) | lo);
+    return (disp << 13) >> 13;               // sign-extend 19 bits
+}
 
 uint8_t spg290::BCOND()
 {
-    uint8_t bc   = (instr >> 22) & 0xF;
-    int32_t disp = (instr >> 1) & 0x1FFFFF;        // 21-bit signed displacement
-    disp = (disp << 11) >> 11;                     // sign-extend
+    uint8_t bc   = (instr >> 10) & 0xF;
+    int32_t disp = decodeBCondDisp19(instr);
 
     if (evalCondition(bc))
-        pc = (pc - 1) + (uint32_t)disp;
+        pc = (pc - instrSize) + (uint32_t)(disp << 1);
 
     return 1;
 }
 
 uint8_t spg290::JX()
 {
-    uint32_t disp = (instr >> 1) & 0xFFFFFF;        // 24-bit absolute word index
+    uint32_t disp = (instr >> 1) & 0xFFFFFF;        // 24-bit displacement (halfwords)
     uint8_t  lk   = instr & 0x1;
 
     if (lk)
         writeReg(3, pc);     // link register r3 = address of following instruction
 
-    pc = disp;
+    uint32_t pcCurrent = pc - instrSize;
+    pc = (pcCurrent & 0xFE000000u) | (disp << 1);
     return 1;
 }
 
@@ -1605,16 +1680,15 @@ uint8_t spg290::BR()
 
 uint8_t spg290::BCONDL()
 {
-    uint8_t bc   = (instr >> 22) & 0xF;
-    int32_t disp = (instr >> 1) & 0x1FFFFF;        // 21-bit signed displacement
-    disp = (disp << 11) >> 11;                     // sign-extend
+    uint8_t bc   = (instr >> 10) & 0xF;
+    int32_t disp = decodeBCondDisp19(instr);
 
     // Link register r3 = address of the following instruction (pc already
     // advanced). The link is always written, regardless of the condition.
     writeReg(3, pc);
 
     if (evalCondition(bc))
-        pc = (pc - 1) + (uint32_t)disp;
+        pc = (pc - instrSize) + (uint32_t)(disp << 1);
 
     return 1;
 }
@@ -1863,33 +1937,33 @@ uint8_t spg290::LSU_UPD()
     bool    pre   = instr & 0x1;
 
     uint32_t base = regs[a_reg];
-    uint16_t addr = (uint16_t)(pre ? (base + (uint32_t)imm) : base);
+    uint32_t addr = pre ? (base + (uint32_t)imm) : base;
 
     switch (sub)
     {
     case 0: // lw
-        writeReg(d_reg, read(addr));
+        writeReg(d_reg, readWord(addr));
         break;
     case 1: // sw
-        write(addr, regs[d_reg]);
+        writeWord(addr, regs[d_reg]);
         break;
     case 2: // lbu
-        writeReg(d_reg, read(addr) & 0xFF);
+        writeReg(d_reg, readByte(addr));
         break;
     case 3: // lb
-        writeReg(d_reg, (uint32_t)(int32_t)(int8_t)(read(addr) & 0xFF));
+        writeReg(d_reg, (uint32_t)(int32_t)(int8_t)readByte(addr));
         break;
     case 4: // lhu
-        writeReg(d_reg, read(addr) & 0xFFFF);
+        writeReg(d_reg, readHalf(addr));
         break;
     case 5: // lh
-        writeReg(d_reg, (uint32_t)(int32_t)(int16_t)(read(addr) & 0xFFFF));
+        writeReg(d_reg, (uint32_t)(int32_t)(int16_t)readHalf(addr));
         break;
     case 6: // sb
-        write(addr, (read(addr) & ~0xFFu) | (regs[d_reg] & 0xFFu));
+        writeByte(addr, (uint8_t)regs[d_reg]);
         break;
     case 7: // sh
-        write(addr, (read(addr) & ~0xFFFFu) | (regs[d_reg] & 0xFFFFu));
+        writeHalf(addr, (uint16_t)regs[d_reg]);
         break;
     }
 
@@ -1996,15 +2070,15 @@ uint8_t spg290::decode16()
         uint8_t func = (w >> 9) & 0x7;
         uint8_t d    = (w >> 5) & 0xF;
         uint8_t a    = (w >> 1) & 0xF;
-        uint16_t addr = (uint16_t)regs[a];
+        uint32_t addr = regs[a];
         switch (func)
         {
-        case 0: writeReg(d, read(addr));                                            break; // lw!
-        case 1: writeReg(d, (uint32_t)(int32_t)(int16_t)(read(addr) & 0xFFFF));     break; // lh!
-        case 2: writeReg(d, read(addr) & 0xFF);                                     break; // lbu!
-        case 3: write(addr, regs[d]);                                            break; // sw!
-        case 4: write(addr, (read(addr) & ~0xFFFFu) | (regs[d] & 0xFFFFu));      break; // sh!
-        case 5: write(addr, (read(addr) & ~0xFFu) | (regs[d] & 0xFFu));          break; // sb!
+        case 0: writeReg(d, readWord(addr));                                   break; // lw!
+        case 1: writeReg(d, (uint32_t)(int32_t)(int16_t)readHalf(addr));       break; // lh!
+        case 2: writeReg(d, readByte(addr));                                   break; // lbu!
+        case 3: writeWord(addr, regs[d]);                                      break; // sw!
+        case 4: writeHalf(addr, (uint16_t)regs[d]);                            break; // sh!
+        case 5: writeByte(addr, (uint8_t)regs[d]);                             break; // sb!
         default: break;
         }
         break;
@@ -2017,70 +2091,86 @@ uint8_t spg290::decode16()
         uint32_t bp  = regs[2];
         switch (func)
         {
-        case 0: writeReg(d, read((uint16_t)(bp + (imm5 << 2))));                                          break; // lwp!
-        case 1: writeReg(d, (uint32_t)(int32_t)(int16_t)(read((uint16_t)(bp + (imm5 << 1))) & 0xFFFF));   break; // lhp!
-        case 2: writeReg(d, read((uint16_t)(bp + imm5)) & 0xFF);                                          break; // lbup!
-        case 3: write((uint16_t)(bp + (imm5 << 2)), regs[d]);                                          break; // swp!
-        case 4: { uint16_t ad = (uint16_t)(bp + (imm5 << 1)); write(ad, (read(ad) & ~0xFFFFu) | (regs[d] & 0xFFFFu)); break; } // shp!
-        case 5: { uint16_t ad = (uint16_t)(bp + imm5);        write(ad, (read(ad) & ~0xFFu)   | (regs[d] & 0xFFu));   break; } // sbp!
+        case 0: writeReg(d, readWord(bp + (imm5 << 2)));                                       break; // lwp!
+        case 1: writeReg(d, (uint32_t)(int32_t)(int16_t)readHalf(bp + (imm5 << 1)));            break; // lhp!
+        case 2: writeReg(d, readByte(bp + imm5));                                              break; // lbup!
+        case 3: writeWord(bp + (imm5 << 2), regs[d]);                                          break; // swp!
+        case 4: writeHalf(bp + (imm5 << 1), (uint16_t)regs[d]);                                break; // shp!
+        case 5: writeByte(bp + imm5, (uint8_t)regs[d]);                                        break; // sbp!
         default: break;
         }
         break;
     }
-    case 0x7: // stack : func1[11] H[10] rD[9:6] rA[5:2]
+    case 0x7: // extended group: a lone 16-bit instruction only has 15 usable
+              // payload bits (bit 15 is the P-bit, confirmed in s_core7.pdf),
+              // so the real "main opcode" is just 3 bits (14:12) — leaving no
+              // room for the previous 4-bit op16 scheme's 0x8-0xF groups.
+              // sub[11:8] multiplexes stack/b{cond}!/br{cond}!/jx!/system
+              // into this one slot for now (bit-exact real encodings for
+              // these are deferred to the ISA audit against the spec).
     {
-        uint8_t func = (w >> 11) & 0x1;
-        uint8_t hbit = (w >> 10) & 0x1;
-        uint8_t d    = (w >> 6) & 0xF;
-        uint8_t a    = (w >> 2) & 0xF;
-        uint8_t dreg = hbit ? (uint8_t)(d + 16) : d;
-        uint32_t base = regs[a];
-        if (func == 0) // pop! : load then post-increment by 4
+        uint8_t sub = (w >> 8) & 0xF;
+        switch (sub)
         {
-            writeReg(dreg, read((uint16_t)base));
-            writeReg(a, base + 4);
-        }
-        else           // push! : pre-decrement by 4 then store
+        case 0x0: // stack : func1[7] H[6] rD[5:3] rA[2:0]
         {
-            write((uint16_t)(base - 4), regs[dreg]);
-            writeReg(a, base - 4);
+            uint8_t func = (w >> 7) & 0x1;
+            uint8_t hbit = (w >> 6) & 0x1;
+            uint8_t d    = (w >> 3) & 0x7;
+            uint8_t a    = w & 0x7;
+            uint8_t dreg = hbit ? (uint8_t)(d + 16) : d;
+            uint32_t base = regs[a];
+            if (func == 0) // pop! : load then post-increment by 4
+            {
+                writeReg(dreg, readWord(base));
+                writeReg(a, base + 4);
+            }
+            else           // push! : pre-decrement by 4 then store
+            {
+                writeWord(base - 4, regs[dreg]);
+                writeReg(a, base - 4);
+            }
+            break;
         }
-        break;
-    }
-    case 0x8: // b{cond}! : cond[11:8] Disp8[7:0]
-    {
-        uint8_t cond = (w >> 8) & 0xF;
-        int32_t disp = (int32_t)(int8_t)(w & 0xFF);    // sign-extended
-        if (evalCondition(cond))
-            pc = (pc - 1) + (uint32_t)disp;
-        break;
-    }
-    case 0x9: // br{cond}! : cond[11:8] rA[7:4]
-    {
-        uint8_t cond = (w >> 8) & 0xF;
-        uint8_t a    = (w >> 4) & 0xF;
-        if (evalCondition(cond))
-            pc = regs[a];
-        break;
-    }
-    case 0xA: // jx! : LK[11] Disp11[10:0]
-    {
-        uint8_t  lk    = (w >> 11) & 0x1;
-        uint32_t disp  = w & 0x7FF;
-        if (lk)
-            writeReg(3, pc);          // link register r3 = following instruction
-        pc = disp;
-        break;
-    }
-    case 0xB: // system : func2[11:10] cond[9:6]
-    {
-        uint8_t func = (w >> 10) & 0x3;
-        if (func == 2)             // t{cond}! : T = condition
+        case 0x1: // b{cond}! : cond[7:4] Disp4[3:0]  (halfword-granular, see BCOND)
         {
-            uint8_t cond = (w >> 6) & 0xF;
-            SetFlag(T, evalCondition(cond));
+            uint8_t cond = (w >> 4) & 0xF;
+            int32_t disp = (int32_t)(int8_t)((w & 0xF) << 4) >> 4;  // sign-extend 4-bit
+            if (evalCondition(cond))
+                pc = (pc - instrSize) + (uint32_t)(disp << 1);
+            break;
         }
-        // func 0 = nop!, func 1 = sdbbp! (debug breakpoint -> no-op here)
+        case 0x2: // br{cond}! : cond[7:4] rA[2:0]
+        {
+            uint8_t cond = (w >> 4) & 0xF;
+            uint8_t a    = w & 0x7;
+            if (evalCondition(cond))
+                pc = regs[a];
+            break;
+        }
+        case 0x3: // jx! : LK[7] Disp7[6:0]
+        {
+            uint8_t  lk   = (w >> 7) & 0x1;
+            uint32_t disp = w & 0x7F;
+            if (lk)
+                writeReg(3, pc);      // link register r3 = following instruction
+            uint32_t pcCurrent = pc - instrSize;
+            pc = (pcCurrent & 0xFFFFFF00u) | (disp << 1);
+            break;
+        }
+        case 0x4: // system : func2[7:6] cond[5:2]
+        {
+            uint8_t func = (w >> 6) & 0x3;
+            if (func == 2)             // t{cond}! : T = condition
+            {
+                uint8_t cond = (w >> 2) & 0xF;
+                SetFlag(T, evalCondition(cond));
+            }
+            // func 0 = nop!, func 1 = sdbbp! (debug breakpoint -> no-op here)
+            break;
+        }
+        default: break;
+        }
         break;
     }
     default: break;
@@ -2164,8 +2254,11 @@ uint8_t spg290::MFSR()
 
 uint8_t spg290::MTSR()
 {
-    uint8_t a_reg  = (instr & 0x3E00000) >> 21;   // mtsr names its source rA
-    uint8_t regnum = (instr & 0x1F0000) >> 16;
+    // Confirmed via score-elf-as: the source GPR is in the rA field (20:16)
+    // and the special-register number is in the rD field (25:21) -- the
+    // opposite role split from mfsr's rD=dest/rA=regnum.
+    uint8_t regnum = (instr & 0x3E00000) >> 21;
+    uint8_t a_reg  = (instr & 0x1F0000) >> 16;
     sr[regnum] = regs[a_reg];
     return 1;
 }
@@ -2255,23 +2348,25 @@ uint8_t spg290::TCOND()
     return 1;
 }
 
-// Minimal exception entry. The faulting instruction sits at pc-1 (pc has
-// already advanced to the following word); save it in EPC (cr5), record the
-// cause in ECR (cr2), and vector to the handler address held in EXCPvec (cr3).
+// Minimal exception entry. The faulting instruction sits at pc-instrSize
+// (pc has already advanced past it); save that address in EPC (cr5), record
+// the cause in ECR (cr2), and vector to the handler address held in
+// EXCPvec (cr3).
 void spg290::raiseException(uint8_t code)
 {
-    cr[5] = pc - 1;
+    cr[5] = pc - instrSize;
     cr[2] = code;
     pc = cr[3];
 }
 
 // trap{cond}: raise a trap exception when the condition holds, otherwise it is
 // a no-op. EC=14 is defined as "no operation" and evalCondition() returns false
-// for it, which matches that behaviour.
+// for it, which matches that behaviour. EC lives in the rB field (confirmed via
+// score-elf-as); rA carries an unused software parameter (Imm5).
 uint8_t spg290::TRAPCOND()
 {
-    uint8_t ec = (instr >> 16) & 0xF;
-    if (evalCondition(ec))
+    uint8_t ec = (instr & 0x7C00) >> 10;
+    if (evalCondition(ec & 0xF))
         raiseException(EXC_TRAP);
     return 1;
 }
@@ -2305,8 +2400,8 @@ uint8_t spg290::LDCX()
     uint8_t creg   = (instr >> 16) & 0x1F;
     uint8_t cp     = (instr >> 8) & 0x3;
     int32_t imm    = (int32_t)(int8_t)(instr & 0xFF);
-    uint16_t addr  = (uint16_t)(regs[base] + (uint32_t)imm);
-    copData[cp][creg] = read(addr);
+    uint32_t addr  = regs[base] + (uint32_t)imm;
+    copData[cp][creg] = readWord(addr);
     return 1;
 }
 
@@ -2317,28 +2412,22 @@ uint8_t spg290::STCX()
     uint8_t creg   = (instr >> 16) & 0x1F;
     uint8_t cp     = (instr >> 8) & 0x3;
     int32_t imm    = (int32_t)(int8_t)(instr & 0xFF);
-    uint16_t addr  = (uint16_t)(regs[base] + (uint32_t)imm);
-    write(addr, copData[cp][creg]);
+    uint32_t addr  = regs[base] + (uint32_t)imm;
+    writeWord(addr, copData[cp][creg]);
     return 1;
 }
 
 // ============================================================
 // Un-aligned load/store combine family (lcb/lcw/lce/scb/scw/sce).
 //
-// The architecture defines these in terms of byte-addressed memory and an
-// endian-dependent byte-lane merge through the LCR/SCR special registers
-// (sr1/sr2). This emulator's memory is word-addressed (one 32-bit word per
-// slot) with no byte addressing, so a bit-exact endian byte-merge is not
-// representable. The model below keeps the essential dataflow and produces a
-// verifiable little-endian un-aligned access:
-//
-//   - rA is treated as a byte address; the accessed word lives in slot rA>>2
-//     and rA is post-incremented by 4 (one word) per instruction, so a
-//     sequence walks consecutive slots while off = rA&3 stays constant.
-//   - off = rA & 3 is the byte offset of the un-aligned word.
-//   - A load reconstructs the word spanning two consecutive slots; a store
-//     splits a word across two consecutive slots, preserving the surrounding
-//     bytes. lcb/lcw and scb/sce therefore round-trip the same value.
+// rA is a real byte address; the word-aligned slot it falls in is
+// (rA & ~3) and off = rA & 3 is the byte offset within that word. rA is
+// post-incremented by 4 per instruction, so a sequence walks consecutive
+// aligned words while off stays constant. A load reconstructs the
+// unaligned word spanning two consecutive aligned words; a store splits a
+// word across two consecutive aligned words, preserving the surrounding
+// bytes. lcb/lcw and scb/sce round-trip the same value (little-endian
+// byte-merge, matching the existing combineLoad() model).
 // ============================================================
 
 // Reconstruct the un-aligned little-endian word: its low (4-off) bytes come
@@ -2355,7 +2444,7 @@ uint8_t spg290::LCB()
 {
     uint8_t a_reg = (instr >> 16) & 0x1F;
     uint32_t ra   = regs[a_reg];
-    sr[1] = read((uint16_t)(ra >> 2));        // LCR = Mem[aligned word]
+    sr[1] = readWord(ra & ~3u);                // LCR = Mem[aligned word]
     writeReg(a_reg, ra + 4);
     return 1;
 }
@@ -2366,7 +2455,7 @@ uint8_t spg290::LCW()
     uint8_t a_reg = (instr >> 16) & 0x1F;
     uint32_t ra   = regs[a_reg];
     uint8_t off   = ra & 3;
-    uint32_t mem  = read((uint16_t)(ra >> 2));
+    uint32_t mem  = readWord(ra & ~3u);
     writeReg(d_reg, combineLoad(sr[1], mem, off));
     sr[1] = mem;                              // LCR = newly read word
     writeReg(a_reg, ra + 4);
@@ -2385,7 +2474,7 @@ uint8_t spg290::LCE()
     }
     else
     {
-        uint32_t mem = read((uint16_t)(ra >> 2));
+        uint32_t mem = readWord(ra & ~3u);
         writeReg(d_reg, combineLoad(sr[1], mem, off));
         sr[1] = mem;
     }
@@ -2399,17 +2488,17 @@ uint8_t spg290::SCB()
     uint8_t a_reg = (instr >> 16) & 0x1F;
     uint32_t ra   = regs[a_reg];
     uint8_t off   = ra & 3;
-    uint16_t slot = (uint16_t)(ra >> 2);
+    uint32_t slot = ra & ~3u;
     sr[2] = regs[d_reg];                      // SCR latches the source word
     if (off == 0)
     {
-        write(slot, sr[2]);
+        writeWord(slot, sr[2]);
     }
     else
     {
         uint32_t lowMask = (1u << (8u * off)) - 1u;
         // Keep the slot's low off bytes; place rD's low (4-off) bytes above.
-        write(slot, (read(slot) & lowMask) | (sr[2] << (8u * off)));
+        writeWord(slot, (readWord(slot) & lowMask) | (sr[2] << (8u * off)));
     }
     writeReg(a_reg, ra + 4);
     return 1;
@@ -2421,12 +2510,12 @@ uint8_t spg290::SCW()
     uint8_t a_reg = (instr >> 16) & 0x1F;
     uint32_t ra   = regs[a_reg];
     uint8_t off   = ra & 3;
-    uint16_t slot = (uint16_t)(ra >> 2);
+    uint32_t slot = ra & ~3u;
     uint32_t rd   = regs[d_reg];
     if (off == 0)
-        write(slot, rd);
+        writeWord(slot, rd);
     else
-        write(slot, (sr[2] >> (8u * (4u - off))) | (rd << (8u * off)));
+        writeWord(slot, (sr[2] >> (8u * (4u - off))) | (rd << (8u * off)));
     sr[2] = rd;
     writeReg(a_reg, ra + 4);
     return 1;
@@ -2437,12 +2526,12 @@ uint8_t spg290::SCE()
     uint8_t a_reg = (instr >> 16) & 0x1F;
     uint32_t ra   = regs[a_reg];
     uint8_t off   = ra & 3;
-    uint16_t slot = (uint16_t)(ra >> 2);
+    uint32_t slot = ra & ~3u;
     if (off != 0)
     {
         uint32_t lowMask = (1u << (8u * off)) - 1u;
         // Keep the slot's high (4-off) bytes; place SCR's high off bytes below.
-        write(slot, (read(slot) & ~lowMask) | (sr[2] >> (8u * (4u - off))));
+        writeWord(slot, (readWord(slot) & ~lowMask) | (sr[2] >> (8u * (4u - off))));
     }
     writeReg(a_reg, ra + 4);
     return 1;

@@ -208,7 +208,7 @@ TEST_F(CPUFixture, LW16_Loads)
 TEST_F(CPUFixture, LH16_SignExtends)
 {
     setReg(6, 50u);
-    setMem(50,  0x0000FFFFu);
+    setMem(50,  0xFFFF0000u);
     execute(encodeLH16(4, 6));
     EXPECT_EQ(getReg(4), 0xFFFFFFFFu);
 }
@@ -218,7 +218,7 @@ TEST_F(CPUFixture, LBU16_ZeroExtends)
     setReg(6, 50u);
     setMem(50,  0xDEADBEEFu);
     execute(encodeLBU16(4, 6));
-    EXPECT_EQ(getReg(4), 0x000000EFu);
+    EXPECT_EQ(getReg(4), 0x000000DEu);
 }
 
 TEST_F(CPUFixture, SW16_Stores)
@@ -235,7 +235,7 @@ TEST_F(CPUFixture, SB16_PreservesUpperBytes)
     setReg(6, 60u);
     setMem(60,  0x11223344u);
     execute(encodeSB16(4, 6));
-    EXPECT_EQ(getMem(60), 0x112233ABu);
+    EXPECT_EQ(getMem(60), 0xAB223344u);
 }
 
 TEST_F(CPUFixture, SH16_PreservesUpperHalf)
@@ -244,7 +244,7 @@ TEST_F(CPUFixture, SH16_PreservesUpperHalf)
     setReg(6, 60u);
     setMem(60,  0x11223344u);
     execute(encodeSH16(4, 6));
-    EXPECT_EQ(getMem(60), 0x1122ABCDu);
+    EXPECT_EQ(getMem(60), 0xABCD3344u);
 }
 
 // ---- memory BP-relative (op16 0x6, BP = r2) ----
@@ -259,7 +259,7 @@ TEST_F(CPUFixture, LWP16_LoadsFromBasePointer)
 TEST_F(CPUFixture, LBUP16_LoadsByteFromBasePointer)
 {
     setReg(2, 40u);
-    setMem(45,  0x000000A5u);            // 40 + 5
+    setMem(45,  0xA5000000u);            // 40 + 5
     execute(encodeLBUP16(4, 5));
     EXPECT_EQ(getReg(4), 0x000000A5u);
 }
@@ -302,18 +302,21 @@ TEST_F(CPUFixture, PUSHPOP16_HighBankRoundTrip)
     EXPECT_EQ(getReg(3), 100u);
 }
 
-// ---- branches / jump (op16 0x8 / 0x9 / 0xA) ----
+// ---- branches / jump (op16 0x7, sub 0x1/0x2/0x3) ----
+// pc is a byte address; a 16-bit instruction is 2 bytes (instrSize=2) and
+// branch/jump displacements are halfword-granular (disp<<1), matching the
+// 32-bit BCOND/JX convention (see src/spg290.cpp).
 TEST_F(CPUFixture, BCOND16_TakenWhenEQ)
 {
     bus.cpu.status |= spg290::Z;
-    execute(encodeBCOND16(4, 5));       // beq! +5
-    EXPECT_EQ(bus.cpu.pc, 5u);
+    execute(encodeBCOND16(4, 5));       // beq! +5 halfwords, executed at pc=0
+    EXPECT_EQ(bus.cpu.pc, 10u);
 }
 
 TEST_F(CPUFixture, BCOND16_NotTaken)
 {
     execute(encodeBCOND16(4, 5));       // Z clear
-    EXPECT_EQ(bus.cpu.pc, 1u);
+    EXPECT_EQ(bus.cpu.pc, 2u);
 }
 
 TEST_F(CPUFixture, BCOND16_NegativeDisplacement)
@@ -321,7 +324,7 @@ TEST_F(CPUFixture, BCOND16_NegativeDisplacement)
     bus.cpu.pc = 10;
     bus.cpu.status |= spg290::Z;
     execute(encodeBCOND16(4, -5));
-    EXPECT_EQ(bus.cpu.pc, 5u);
+    EXPECT_EQ(bus.cpu.pc, 0u);
 }
 
 TEST_F(CPUFixture, BRCOND16_TakenToRegister)
@@ -335,23 +338,23 @@ TEST_F(CPUFixture, BRCOND16_TakenToRegister)
 TEST_F(CPUFixture, JX16_Jump)
 {
     execute(encodeJX16(20, false));
-    EXPECT_EQ(bus.cpu.pc, 20u);
+    EXPECT_EQ(bus.cpu.pc, 40u);
 }
 
 TEST_F(CPUFixture, JX16_JumpAndLink)
 {
     execute(encodeJX16(20, true));
-    EXPECT_EQ(bus.cpu.pc, 20u);
-    EXPECT_EQ(getReg(3), 1u);           // link = following instruction
+    EXPECT_EQ(bus.cpu.pc, 40u);
+    EXPECT_EQ(getReg(3), 2u);           // link = following instruction
 }
 
-// ---- system (op16 0xB) ----
+// ---- system (op16 0x7, sub 0x4) ----
 TEST_F(CPUFixture, NOP16_DoesNothing)
 {
     setReg(4, 0x12345678u);
     execute(encodeNOP16());
     EXPECT_EQ(getReg(4), 0x12345678u);
-    EXPECT_EQ(bus.cpu.pc, 1u);
+    EXPECT_EQ(bus.cpu.pc, 2u);
 }
 
 TEST_F(CPUFixture, SDBBP16_TreatedAsNoOp)
@@ -373,4 +376,27 @@ TEST_F(CPUFixture, TCOND16_ClearsWhenConditionFails)
     bus.cpu.status |= spg290::T;        // start set
     execute(encodeTCOND16(4));          // EQ, but Z clear -> condition false
     EXPECT_EQ(getFlag(spg290::T), 0);
+}
+
+// ============================================================
+// Regression: a 16-bit instruction is 2 bytes and a 32-bit instruction is
+// 4 bytes, packed at their own natural size in byte-addressed memory (not
+// one fixed-width slot per instruction). Place one of each back-to-back
+// and step the CPU instruction-by-instruction to prove pc advances by the
+// real size of whichever form was just fetched.
+// ============================================================
+TEST_F(CPUFixture, MixedWidthInstructions_FetchAdvancesByRealSize)
+{
+    setReg(4, 10u);
+    setReg(5, 5u);
+    bus.write16(0, (uint16_t)(encodeADD16(4, 5) >> 16));   // add! r4, r5 (2 bytes @ 0)
+    bus.write32(2, encodeADDIX(6, 1, false));              // addi r6, 1 (4 bytes @ 2)
+
+    bus.cpu.clock();                 // executes the 16-bit add!
+    EXPECT_EQ(bus.cpu.pc, 2u);
+    EXPECT_EQ(getReg(4), 15u);
+
+    bus.cpu.clock();                 // executes the 32-bit addi
+    EXPECT_EQ(bus.cpu.pc, 6u);
+    EXPECT_EQ(getReg(6), 1u);
 }

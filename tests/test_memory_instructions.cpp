@@ -1,9 +1,8 @@
 #include "test_helpers.h"
 
 // ============================================================
-// Loads / stores. Effective address = GPRrA + sext(Imm15), used
-// as a word index. rA holds the base address; data lives at the
-// addressed slot (registers and memory share the bus RAM array).
+// Loads / stores. Effective address = GPRrA + sext(Imm15), a real 32-bit
+// byte address routed through the Bus (RAM, or the PPU register window).
 // ============================================================
 
 // --- LW : rD = Mem32[rA + imm] ---
@@ -41,18 +40,20 @@ TEST_F(CPUFixture, SW_Basic)
 }
 
 // --- LBU / LB : load byte ---
+// Byte-within-word ordering is big-endian (Score7 default): the byte at
+// offset 0 of a stored word is its most-significant byte.
 TEST_F(CPUFixture, LBU_ZeroExtends)
 {
     setReg(2, 100u);
     setMem(100,  0xDEADBEEFu);
     execute(encodeLBU(4, 2, 0));
-    EXPECT_EQ(getReg(4), 0x000000EFu);
+    EXPECT_EQ(getReg(4), 0x000000DEu);
 }
 
 TEST_F(CPUFixture, LB_SignExtends)
 {
     setReg(2, 100u);
-    setMem(100,  0x000000FFu);
+    setMem(100,  0xFF000000u);
     execute(encodeLB(4, 2, 0));
     EXPECT_EQ(getReg(4), 0xFFFFFFFFu);
 }
@@ -63,25 +64,26 @@ TEST_F(CPUFixture, LHU_ZeroExtends)
     setReg(2, 100u);
     setMem(100,  0xDEADBEEFu);
     execute(encodeLHU(4, 2, 0));
-    EXPECT_EQ(getReg(4), 0x0000BEEFu);
+    EXPECT_EQ(getReg(4), 0x0000DEADu);
 }
 
 TEST_F(CPUFixture, LH_SignExtends)
 {
     setReg(2, 100u);
-    setMem(100,  0x0000FFFFu);
+    setMem(100,  0xFFFF0000u);
     execute(encodeLH(4, 2, 0));
     EXPECT_EQ(getReg(4), 0xFFFFFFFFu);
 }
 
-// --- SB / SH : store byte / half-word (read-modify-write) ---
+// --- SB / SH : store byte / half-word (now genuine single-byte/half
+// accesses, not a read-modify-write of an enclosing word) ---
 TEST_F(CPUFixture, SB_PreservesUpperBytes)
 {
     setReg(4, 0x000000ABu);
     setReg(2, 200u);
     setMem(200,  0x11223344u);
     execute(encodeSB(4, 2, 0));
-    EXPECT_EQ(getMem(200), 0x112233ABu);
+    EXPECT_EQ(getMem(200), 0xAB223344u);
 }
 
 TEST_F(CPUFixture, SH_PreservesUpperHalf)
@@ -90,7 +92,22 @@ TEST_F(CPUFixture, SH_PreservesUpperHalf)
     setReg(2, 200u);
     setMem(200,  0x11223344u);
     execute(encodeSH(4, 2, 0));
-    EXPECT_EQ(getMem(200), 0x1122ABCDu);
+    EXPECT_EQ(getMem(200), 0xABCD3344u);
+}
+
+// --- Regression: ordinary LW/SW must reach the PPU register window.
+// Previously the CPU's load/store path was truncated to a 16-bit RAM-only
+// address and could never touch PPU::BASE (0x8801_0000) at all. ---
+TEST_F(CPUFixture, SW_LW_ReachPPURegisterWindow)
+{
+    setReg(2, PPU::BASE);
+    setReg(4, 0x00008001u);          // PPUEN | QVGA
+    execute(encodeSW(4, 2, 0));      // Mem[PPU::BASE] = r4
+    EXPECT_EQ(bus.ppu.read32(PPU::BASE), 0x00008001u);
+
+    bus.ppu.write32(PPU::BASE, 0x12345678u);
+    execute(encodeLW(5, 2, 0));      // r5 = Mem[PPU::BASE]
+    EXPECT_EQ(getReg(5), 0x12345678u);
 }
 
 // --- Round trip ---

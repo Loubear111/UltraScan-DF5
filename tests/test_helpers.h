@@ -31,7 +31,7 @@ protected:
     // instruction, then leaves cycles back at 0.
     void execute(uint32_t instr_word)
     {
-        bus.ram[bus.cpu.pc] = instr_word;
+        bus.write32(bus.cpu.pc, instr_word);
         bus.cpu.clock();
     }
 
@@ -41,10 +41,11 @@ protected:
         return bus.cpu.GetFlag(f);
     }
 
-    // Direct bus RAM access — use these for memory operands in load/store tests,
-    // not for CPU registers (which are in bus.cpu.regs[]).
-    void setMem(uint16_t addr, uint32_t val) { bus.ram[addr] = val; }
-    uint32_t getMem(uint16_t addr) const     { return bus.ram[addr]; }
+    // Direct bus memory access (byte-addressed, full 32-bit word) — use
+    // these for memory operands in load/store tests, not for CPU registers
+    // (which are in bus.cpu.regs[]).
+    void setMem(uint32_t addr, uint32_t val) { bus.write32(addr, val); }
+    uint32_t getMem(uint32_t addr) const     { return bus.read32(addr); }
 };
 
 // ============================================================
@@ -55,12 +56,13 @@ protected:
 //   1. Write PASS_VALUE or an error code to ROM_RESULT_ADDR.
 //   2. Write any non-zero value to ROM_DONE_ADDR.
 //
-// The addresses are placed near the top of the 64K address space
-// so they never collide with a short instruction sequence loaded
-// at address 0.
+// These are real byte addresses, word-aligned and 4 bytes apart so a
+// 32-bit SW to each does not overlap the other; placed near the top of
+// the address space so they never collide with a short instruction
+// sequence loaded at address 0.
 // ============================================================
 static constexpr uint32_t ROM_DONE_ADDR   = 0xFF00u; // write non-zero when done
-static constexpr uint32_t ROM_RESULT_ADDR = 0xFF01u; // PASS_VALUE or error code
+static constexpr uint32_t ROM_RESULT_ADDR = 0xFF04u; // PASS_VALUE or error code
 static constexpr uint32_t PASS_VALUE      = 0xDEADu;
 
 
@@ -94,14 +96,14 @@ protected:
         bus.loadROM(prog, len);
         for (uint32_t i = 0; i < max_cycles; ++i)
         {
-            if (bus.ram[ROM_DONE_ADDR] != 0)
+            if (bus.read32(ROM_DONE_ADDR) != 0)
                 break;
             bus.cpu.clock();
         }
     }
 
-    bool     romPassed() const { return bus.ram[ROM_RESULT_ADDR] == PASS_VALUE; }
-    uint32_t romResult() const { return bus.ram[ROM_RESULT_ADDR]; }
+    bool     romPassed() const { return bus.read32(ROM_RESULT_ADDR) == PASS_VALUE; }
+    uint32_t romResult() const { return bus.read32(ROM_RESULT_ADDR); }
 };
 
 
@@ -192,23 +194,28 @@ enum : uint32_t {
     EF6_NOP=0x00,
     // Arithmetic (confirmed)
     EF6_ADDX=0x08, EF6_ADDCX=0x09, EF6_SUBX=0x0A, EF6_SUBCX=0x0B, EF6_NEGX=0x0F,
-    // TODO unknowns (placeholder values in valid 6-bit range)
-    EF6_CMP=0x06, EF6_CMPZ=0x07, EF6_MVCOND=0x26, EF6_REM=0x27, EF6_REMU=0x28,
+    // TODO unknowns (placeholder values in valid 6-bit range; real values confirmed
+    // via score-elf-as but blocked by collisions with the un-audited HWMAC/CE family
+    // -- see /memories/session/phase2-isa-audit.md)
+    EF6_CMP=0x06, EF6_CMPZ=0x07, EF6_MVCOND=0x26, EF6_REM=0x27, EF6_REMU=0x2A,
     // Bitwise (confirmed)
     EF6_ANDX=0x10, EF6_ORX=0x11, EF6_NOTX=0x12, EF6_XORX=0x13,
-    // TODO unknown
+    // TODO unknown (see note above)
     EF6_BITTSTC=0x14,
     // Shifts/rotates (confirmed)
     EF6_SLLX=0x18, EF6_SRLX=0x1A, EF6_SRAX=0x1B, EF6_ROLX=0x1E, EF6_RORX=0x1C,
     EF6_SLLIX=0x38, EF6_SRLIX=0x3A, EF6_SRAIX=0x3B, EF6_ROLIX=0x3E, EF6_RORIX=0x3C,
-    // TODO rotate-through-carry (placeholder values in valid 6-bit range)
-    EF6_ROLC=0x17, EF6_ROLIC=0x29, EF6_RORC=0x19, EF6_RORIC=0x2A,
+    // rotate-through-carry: ROLIC/RORIC confirmed via score-elf-as; ROLC/RORC's real
+    // values collide with the un-audited HWMAC/CE family, kept as placeholders.
+    EF6_ROLC=0x17, EF6_ROLIC=0x3F, EF6_RORC=0x19, EF6_RORIC=0x3D,
     // Extend (confirmed)
     EF6_EXTSBX=0x2C, EF6_EXTSHX=0x2D, EF6_EXTZBX=0x2E, EF6_EXTZHX=0x2F,
     // Multiply/divide (confirmed)
     EF6_MUL=0x20, EF6_MULU=0x21, EF6_DIV=0x22, EF6_DIVU=0x23,
-    // CE register moves (confirmed; rB=1 for CEL, rB=2 for CEH)
+    // CE register moves (confirmed; rB=1 for CEL, rB=2 for CEH, rB=3 for both)
     EF6_MFCEL=0x24, EF6_MFCEH=0x24, EF6_MTCEL=0x25, EF6_MTCEH=0x25,
+    // Confirmed real R-type instructions (previously only reachable via OP_SYS)
+    EF6_SYSCALL=0x01, EF6_TRAPCOND=0x02, EF6_MFSR=0x28, EF6_MTSR=0x29,
     // HWMAC sub-fields (opcode 0x1C, not R-type)
     EF6_MAD=0x0C, EF6_MADU=0x0D, EF6_MSB=0x0E, EF6_MSBU=0x32,
     // Saturating/misc → HWMAC, placeholders in valid 6-bit range
@@ -300,7 +307,9 @@ static inline uint32_t encodeORIX(uint8_t d, uint16_t imm16, bool cu) { return e
 static inline uint32_t encodeORISX(uint8_t d, uint16_t imm16, bool cu) { return encIS(5, d, imm16, cu); }  // oris opcode=5 func3=5
 static inline uint32_t encodeCMPI(uint8_t d, uint16_t imm16) { return encI1(2, d, imm16, true); }
 static inline uint32_t encodeLDI(uint8_t d, uint16_t imm16) { return encI1(6, d, imm16, false); }  // ldi opcode=1 func3=6
-static inline uint32_t encodeLDIS(uint8_t d, uint16_t imm16) { return encI2(0, d, imm16, false); }
+// ldis: confirmed via score-elf-as to be OP_ITYPE_S func3=6 (opcode 5), not the
+// OP_ITYPE2 placeholder opcode.
+static inline uint32_t encodeLDIS(uint8_t d, uint16_t imm16) { return encIS(6, d, imm16, false); }
 static inline uint32_t encodeSUBIX(uint8_t d, uint16_t imm16, bool cu) { return encI2(1, d, imm16, cu); }
 static inline uint32_t encodeSUBISX(uint8_t d, uint16_t imm16, bool cu) { return encI2(2, d, imm16, cu); }
 static inline uint32_t encodeORRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu) { return encRIX(0x0D, d, a, imm14, cu); }  // orri opcode=0x0D
@@ -368,12 +377,22 @@ static inline uint32_t encodeLBU(uint8_t d, uint8_t a, uint16_t imm) { return en
 static inline uint32_t encodeSB(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x17, d, a, imm); }  // OP_SB=0x17 (was 0x16)
 
 // --- Control flow ---
-static inline uint32_t encodeBCOND(uint8_t bc, int32_t disp)
+// b{cond}/b{cond}l share one real opcode (0x04); CU bit selects the link
+// form. BC at bits13:10, split 19-bit displacement (Disp[18:9] at bits24:15,
+// Disp[8:0] at bits9:1) -- confirmed via score-elf-as, see spg290.cpp.
+static inline uint32_t encodeBC(uint8_t bc, int32_t disp19, bool link)
 {
-    return 0x80000000u | (0x18u << 26)
-         | ((uint32_t)(bc & 0xF) << 22)
-         | (((uint32_t)disp & 0x1FFFFF) << 1);
+    uint32_t d = (uint32_t)disp19 & 0x7FFFF;
+    uint32_t hi = (d >> 9) & 0x3FF;
+    uint32_t lo = d & 0x1FF;
+    return 0x80000000u | (0x04u << 26)
+         | (hi << 15)
+         | ((uint32_t)(bc & 0xF) << 10)
+         | (lo << 1)
+         | (link ? 1u : 0u);
 }
+static inline uint32_t encodeBCOND(uint8_t bc, int32_t disp)  { return encodeBC(bc, disp, false); }
+static inline uint32_t encodeBCONDL(uint8_t bc, int32_t disp) { return encodeBC(bc, disp, true); }
 static inline uint32_t encodeJX(uint32_t disp24, bool lk)
 {
     return 0x80000000u | (0x02u << 26)  // OP_JX=0x02 (was 0x19)
@@ -385,12 +404,6 @@ static inline uint32_t encodeBR(uint8_t bc, uint8_t a)
     return 0x80000000u | (0x1Au << 26)
          | ((uint32_t)(bc & 0xF) << 22)
          | ((uint32_t)(a & 0x1F) << 16);
-}
-static inline uint32_t encodeBCONDL(uint8_t bc, int32_t disp)
-{
-    return 0x80000000u | (0x1Du << 26)
-         | ((uint32_t)(bc & 0xF) << 22)
-         | (((uint32_t)disp & 0x1FFFFF) << 1);
 }
 static inline uint32_t encodeBRL(uint8_t bc, uint8_t a)
 {
@@ -466,13 +479,19 @@ static inline uint32_t encodeSH_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)
 // ============================================================
 // 16-bit ("!") instruction encoders. All clear bit 31 so the decoder
 // routes them through decode16(). See the layout in src/spg290.h.
+//
+// The payload is placed in the UPPER 16 bits of the returned word: a lone
+// 16-bit instruction is the first halfword fetched at its address (byte-
+// addressed, big-endian), so it must occupy the high half, not the low
+// half. The low 16 bits are left as 0 (decodes as a harmless add! r0,r0
+// no-op if ever reached, e.g. by a ROM program's sequential fetch).
 // ============================================================
 
 // op16 0x0 : RR-ALU  (func4, rD, rA)
 static inline uint32_t enc16_rr(uint8_t func4, uint8_t d, uint8_t a)
 {
-    return ((uint32_t)0x0 << 12) | ((uint32_t)(func4 & 0xF) << 8)
-         | ((uint32_t)(d & 0xF) << 4) | (uint32_t)(a & 0xF);
+    return (((uint32_t)0x0 << 12) | ((uint32_t)(func4 & 0xF) << 8)
+         | ((uint32_t)(d & 0xF) << 4) | (uint32_t)(a & 0xF)) << 16;
 }
 static inline uint32_t encodeADD16(uint8_t d, uint8_t a)  { return enc16_rr(0, d, a); }
 static inline uint32_t encodeADDC16(uint8_t d, uint8_t a) { return enc16_rr(1, d, a); }
@@ -491,14 +510,14 @@ static inline uint32_t encodeSRA16(uint8_t d, uint8_t a)  { return enc16_rr(12, 
 // op16 0x1 : ldiu!  (rD, Imm8)
 static inline uint32_t encodeLDIU16(uint8_t d, uint8_t imm8)
 {
-    return ((uint32_t)0x1 << 12) | ((uint32_t)(d & 0xF) << 8) | (uint32_t)imm8;
+    return (((uint32_t)0x1 << 12) | ((uint32_t)(d & 0xF) << 8) | (uint32_t)imm8) << 16;
 }
 
 // op16 0x2 : R-Imm  (func2, rD, Imm)
 static inline uint32_t enc16_rimm(uint8_t func2, uint8_t d, uint8_t imm)
 {
-    return ((uint32_t)0x2 << 12) | ((uint32_t)(func2 & 0x3) << 10)
-         | ((uint32_t)(d & 0xF) << 6) | (uint32_t)(imm & 0x3F);
+    return (((uint32_t)0x2 << 12) | ((uint32_t)(func2 & 0x3) << 10)
+         | ((uint32_t)(d & 0xF) << 6) | (uint32_t)(imm & 0x3F)) << 16;
 }
 static inline uint32_t encodeSLLI16(uint8_t d, uint8_t sa5)   { return enc16_rimm(0, d, sa5 & 0x1F); }
 static inline uint32_t encodeSRLI16(uint8_t d, uint8_t sa5)   { return enc16_rimm(1, d, sa5 & 0x1F); }
@@ -508,25 +527,25 @@ static inline uint32_t encodeSUBEI16(uint8_t d, uint8_t imm4) { return enc16_rim
 // op16 0x3 : bittst!  (rD, BN)
 static inline uint32_t encodeBITTST16(uint8_t d, uint8_t bn)
 {
-    return ((uint32_t)0x3 << 12) | ((uint32_t)(d & 0xF) << 8) | ((uint32_t)(bn & 0x1F) << 3);
+    return (((uint32_t)0x3 << 12) | ((uint32_t)(d & 0xF) << 8) | ((uint32_t)(bn & 0x1F) << 3)) << 16;
 }
 
 // op16 0x4 : cross-bank moves  (func1, rD, rA)
 static inline uint32_t encodeMLFH16(uint8_t d, uint8_t a)  // rD(lo) = rA(hi)
 {
-    return ((uint32_t)0x4 << 12) | ((uint32_t)(d & 0xF) << 4) | (uint32_t)(a & 0xF);
+    return (((uint32_t)0x4 << 12) | ((uint32_t)(d & 0xF) << 4) | (uint32_t)(a & 0xF)) << 16;
 }
 static inline uint32_t encodeMHFL16(uint8_t d, uint8_t a)  // rD(hi) = rA(lo)
 {
-    return ((uint32_t)0x4 << 12) | ((uint32_t)0x1 << 11)
-         | ((uint32_t)(d & 0xF) << 4) | (uint32_t)(a & 0xF);
+    return (((uint32_t)0x4 << 12) | ((uint32_t)0x1 << 11)
+         | ((uint32_t)(d & 0xF) << 4) | (uint32_t)(a & 0xF)) << 16;
 }
 
 // op16 0x5 : memory simple  (func3, rD, rA)
 static inline uint32_t enc16_mem(uint8_t func3, uint8_t d, uint8_t a)
 {
-    return ((uint32_t)0x5 << 12) | ((uint32_t)(func3 & 0x7) << 9)
-         | ((uint32_t)(d & 0xF) << 5) | ((uint32_t)(a & 0xF) << 1);
+    return (((uint32_t)0x5 << 12) | ((uint32_t)(func3 & 0x7) << 9)
+         | ((uint32_t)(d & 0xF) << 5) | ((uint32_t)(a & 0xF) << 1)) << 16;
 }
 static inline uint32_t encodeLW16(uint8_t d, uint8_t a)  { return enc16_mem(0, d, a); }
 static inline uint32_t encodeLH16(uint8_t d, uint8_t a)  { return enc16_mem(1, d, a); }
@@ -538,8 +557,8 @@ static inline uint32_t encodeSB16(uint8_t d, uint8_t a)  { return enc16_mem(5, d
 // op16 0x6 : memory BP-relative  (func3, rD, Imm5)  (BP = r2)
 static inline uint32_t enc16_membp(uint8_t func3, uint8_t d, uint8_t imm5)
 {
-    return ((uint32_t)0x6 << 12) | ((uint32_t)(func3 & 0x7) << 9)
-         | ((uint32_t)(d & 0xF) << 5) | (uint32_t)(imm5 & 0x1F);
+    return (((uint32_t)0x6 << 12) | ((uint32_t)(func3 & 0x7) << 9)
+         | ((uint32_t)(d & 0xF) << 5) | (uint32_t)(imm5 & 0x1F)) << 16;
 }
 static inline uint32_t encodeLWP16(uint8_t d, uint8_t imm5)  { return enc16_membp(0, d, imm5); }
 static inline uint32_t encodeLHP16(uint8_t d, uint8_t imm5)  { return enc16_membp(1, d, imm5); }
@@ -548,42 +567,52 @@ static inline uint32_t encodeSWP16(uint8_t d, uint8_t imm5)  { return enc16_memb
 static inline uint32_t encodeSHP16(uint8_t d, uint8_t imm5)  { return enc16_membp(4, d, imm5); }
 static inline uint32_t encodeSBP16(uint8_t d, uint8_t imm5)  { return enc16_membp(5, d, imm5); }
 
-// op16 0x7 : stack  (func1, H, rD, rA)
+// op16 0x7 : extended group. A lone 16-bit instruction only has 15 usable
+// payload bits (bit 15 is the hardware P-bit, confirmed in s_core7.pdf), so
+// the real main opcode is 3 bits (14:12) -- sub[11:8] multiplexes
+// stack/b{cond}!/br{cond}!/jx!/system into this one remaining slot for now
+// (bit-exact real encodings are deferred to the ISA audit against the spec).
+static inline uint32_t enc16_group7(uint8_t sub)
+{
+    return ((uint32_t)0x7 << 12) | ((uint32_t)(sub & 0xF) << 8);
+}
+
+// sub 0x0 : stack  (func1, H, rD[2:0], rA[2:0])
 static inline uint32_t encodePOP16(uint8_t d, uint8_t a, bool high)
 {
-    return ((uint32_t)0x7 << 12) | ((uint32_t)(high ? 1u : 0u) << 10)
-         | ((uint32_t)(d & 0xF) << 6) | ((uint32_t)(a & 0xF) << 2);
+    return (enc16_group7(0x0) | ((uint32_t)(high ? 1u : 0u) << 6)
+         | ((uint32_t)(d & 0x7) << 3) | (uint32_t)(a & 0x7)) << 16;
 }
 static inline uint32_t encodePUSH16(uint8_t d, uint8_t a, bool high)
 {
-    return ((uint32_t)0x7 << 12) | ((uint32_t)0x1 << 11) | ((uint32_t)(high ? 1u : 0u) << 10)
-         | ((uint32_t)(d & 0xF) << 6) | ((uint32_t)(a & 0xF) << 2);
+    return (enc16_group7(0x0) | ((uint32_t)0x1 << 7) | ((uint32_t)(high ? 1u : 0u) << 6)
+         | ((uint32_t)(d & 0x7) << 3) | (uint32_t)(a & 0x7)) << 16;
 }
 
-// op16 0x8 : b{cond}!  (cond, Disp8)
-static inline uint32_t encodeBCOND16(uint8_t cond, int8_t disp8)
+// sub 0x1 : b{cond}!  (cond, Disp4 -- reduced width, see enc16_group7 note)
+static inline uint32_t encodeBCOND16(uint8_t cond, int8_t disp4)
 {
-    return ((uint32_t)0x8 << 12) | ((uint32_t)(cond & 0xF) << 8) | (uint32_t)((uint8_t)disp8);
+    return (enc16_group7(0x1) | ((uint32_t)(cond & 0xF) << 4) | (uint32_t)((uint8_t)disp4 & 0xF)) << 16;
 }
 
-// op16 0x9 : br{cond}!  (cond, rA)
+// sub 0x2 : br{cond}!  (cond, rA[2:0])
 static inline uint32_t encodeBRCOND16(uint8_t cond, uint8_t a)
 {
-    return ((uint32_t)0x9 << 12) | ((uint32_t)(cond & 0xF) << 8) | ((uint32_t)(a & 0xF) << 4);
+    return (enc16_group7(0x2) | ((uint32_t)(cond & 0xF) << 4) | (uint32_t)(a & 0x7)) << 16;
 }
 
-// op16 0xA : jx!  (LK, Disp11)
-static inline uint32_t encodeJX16(uint16_t disp11, bool lk)
+// sub 0x3 : jx!  (LK, Disp7 -- reduced width, see enc16_group7 note)
+static inline uint32_t encodeJX16(uint16_t disp7, bool lk)
 {
-    return ((uint32_t)0xA << 12) | ((uint32_t)(lk ? 1u : 0u) << 11) | (uint32_t)(disp11 & 0x7FF);
+    return (enc16_group7(0x3) | ((uint32_t)(lk ? 1u : 0u) << 7) | (uint32_t)(disp7 & 0x7F)) << 16;
 }
 
-// op16 0xB : system  (func2, cond)
-static inline uint32_t encodeNOP16()  { return ((uint32_t)0xB << 12); }
-static inline uint32_t encodeSDBBP16(){ return ((uint32_t)0xB << 12) | ((uint32_t)0x1 << 10); }
+// sub 0x4 : system  (func2, cond)
+static inline uint32_t encodeNOP16()  { return enc16_group7(0x4) << 16; }
+static inline uint32_t encodeSDBBP16(){ return (enc16_group7(0x4) | ((uint32_t)0x1 << 6)) << 16; }
 static inline uint32_t encodeTCOND16(uint8_t cond)
 {
-    return ((uint32_t)0xB << 12) | ((uint32_t)0x2 << 10) | ((uint32_t)(cond & 0xF) << 6);
+    return (enc16_group7(0x4) | ((uint32_t)0x2 << 6) | ((uint32_t)(cond & 0xF) << 2)) << 16;
 }
 
 // ============================================================
@@ -601,8 +630,11 @@ static inline uint32_t encSYS(uint8_t sub, uint8_t d, uint8_t regnum, uint8_t cp
 }
 static inline uint32_t encodeMFCR(uint8_t d, uint8_t crn)  { return encSYS(0x00, d, crn, 0); }
 static inline uint32_t encodeMTCR(uint8_t d, uint8_t crn)  { return encSYS(0x01, d, crn, 0); }
-static inline uint32_t encodeMFSR(uint8_t d, uint8_t srn)  { return encSYS(0x02, d, srn, 0); }
-static inline uint32_t encodeMTSR(uint8_t a, uint8_t srn)  { return encSYS(0x03, a, srn, 0); }
+// mfsr/mtsr: confirmed via score-elf-as to be ordinary R-type instructions
+// (func6 0x28/0x29), not OP_SYS sub-ops -- see spg290.h. mtsr's rD/rA roles
+// are swapped relative to mfsr (rD=srn, rA=source register).
+static inline uint32_t encodeMFSR(uint8_t d, uint8_t srn)  { return encR(0x28, d, srn, 0, false); }
+static inline uint32_t encodeMTSR(uint8_t a, uint8_t srn)  { return encR(0x29, srn, a, 0, false); }
 static inline uint32_t encodeMFCX(uint8_t d, uint8_t crn, uint8_t cp)  { return encSYS(0x04, d, crn, cp); }
 static inline uint32_t encodeMTCX(uint8_t d, uint8_t crn, uint8_t cp)  { return encSYS(0x05, d, crn, cp); }
 static inline uint32_t encodeMFCCX(uint8_t d, uint8_t crn, uint8_t cp) { return encSYS(0x06, d, crn, cp); }
@@ -611,10 +643,12 @@ static inline uint32_t encodeMTCCX(uint8_t d, uint8_t crn, uint8_t cp) { return 
 static inline uint32_t encodeMFCEX(uint8_t d, uint8_t a, uint8_t hilo) { return encSYS(0x08, d, a, hilo); }
 static inline uint32_t encodeMTCEX(uint8_t d, uint8_t a, uint8_t hilo) { return encSYS(0x09, d, a, hilo); }
 static inline uint32_t encodeCOPX() { return encSYS(0x0A, 0, 0, 0); }
-// t{cond} / trap{cond}: EC occupies the regnum field (bits 20:16).
+// t{cond}: EC occupies the regnum field (bits 20:16) -- NOT re-verified this pass.
 static inline uint32_t encodeTCOND(uint8_t ec)    { return encSYS(0x0B, 0, ec, 0); }
-static inline uint32_t encodeTRAPCOND(uint8_t ec) { return encSYS(0x0C, 0, ec, 0); }
-static inline uint32_t encodeSYSCALL()            { return encSYS(0x0D, 0, 0, 0); }
+// trap{cond}/syscall: confirmed via score-elf-as to be ordinary R-type instructions
+// (func6 0x02/0x01), not OP_SYS sub-ops. trap{cond}'s EC lives in the rB field.
+static inline uint32_t encodeTRAPCOND(uint8_t ec) { return encR(0x02, 0, 0, ec, false); }
+static inline uint32_t encodeSYSCALL()            { return encR(0x01, 0, 0, 0, false); }
 static inline uint32_t encodeRTE()                { return encSYS(0x0E, 0, 0, 0); }
 static inline uint32_t encodeDRTE()               { return encSYS(0x0F, 0, 0, 0); }
 static inline uint32_t encodeSLEEP()              { return encSYS(0x10, 0, 0, 0); }
