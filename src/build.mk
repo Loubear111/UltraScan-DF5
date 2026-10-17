@@ -6,7 +6,7 @@ CXXFLAGS = -Wall -Wextra -std=c++17
 TARGET = main
 
 #all objects 
-OBJS = main.o Bus.o spg290.o ppu.o
+OBJS = main.o Bus.o spg290.o ppu.o IRQController.o
 
 # Default target
 all: $(TARGET)
@@ -24,7 +24,11 @@ spg290.o: spg290.cpp Bus.o
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # compile bus
-Bus.o: Bus.cpp ppu.o
+Bus.o: Bus.cpp Bus.h ppu.o IRQController.o
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# compile irq controller
+IRQController.o: IRQController.cpp IRQController.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # compile ppu
@@ -48,7 +52,7 @@ TEST_TARGET = ../tests/test_runner
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
 
-$(TEST_TARGET): Bus.o spg290.o ppu.o $(TEST_OBJS)
+$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ -lgtest -lgtest_main -pthread
 
 # Compile test sources with -I. so they can find Bus.h / spg290.h

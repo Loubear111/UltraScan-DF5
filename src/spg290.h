@@ -18,32 +18,42 @@ public:
 
 	enum FLAGS290
 	{
-		// TODO: Find out what flags there are for the spg290
-		/*
-		Here's an example of flags for the NES's 6502 chip
-		The SPG290 should be somewhat similar...
+		// Emulator-internal condition flags (the real Condition register, cr1,
+		// has unknown bit positions; mfcr/mtcr cr1 read/write this word).
+		// Interrupt enable lives in PSR (cr0), not here.
 		C = (1 << 0),	// Carry Bit
 		Z = (1 << 1),	// Zero
-		I = (1 << 2),	// Disable Interrupts
-		D = (1 << 3),	// Decimal Mode (unused in this implementation)
-		B = (1 << 4),	// Break
-		U = (1 << 5),	// Unused
-		V = (1 << 6),	// Overflow
-		N = (1 << 7),	// Negative
-		*/
-
-		// k, can't find documentation on spg290 flag bits so... 
-		// going to use the NES for now since its fairly similar I hope
-		C = (1 << 0),	// Carry Bit
-		Z = (1 << 1),	// Zero
-		I = (1 << 2),	// Disable Interrupts
-		D = (1 << 3),	// Decimal Mode (unused in this implementation)
-		B = (1 << 4),	// Break
-		U = (1 << 5),	// Unused
 		V = (1 << 6),	// Overflow
 		N = (1 << 7),	// Negative
 		T = (1 << 8),	// T (true) condition flag, set by cmp{TCS}.c / cmpz{TCS}.c
 	};
+
+	// Processor Status Register (cr0). IEc is confirmed (Linux score port);
+	// UMs is confirmed as bit 3, UMc/IEs positions follow the rte formula
+	// PSR.{UMs,IEs,UMc,IEc} read high-to-low.
+	enum PSR_BITS : uint32_t
+	{
+		PSR_IEC = 1u << 0,	// interrupts enabled
+		PSR_UMC = 1u << 1,	// user mode (current)
+		PSR_IES = 1u << 2,	// saved IEc
+		PSR_UMS = 1u << 3,	// saved UMc
+	};
+
+	// Exception Cause Register (cr2): Exc_code in 4:0, vectored IRQ number
+	// (IP[7:2]) in 23:18.
+	static constexpr uint32_t ECR_CODE_MASK     = 0x1Fu;
+	static constexpr uint32_t ECR_VECTOR_SHIFT  = 18;
+	static constexpr uint32_t ECR_VECTOR_MASK   = 0x3Fu << ECR_VECTOR_SHIFT;
+
+	// Drive the core's single IRQ input. `vector` is the controller-supplied
+	// vector number (0..63) and is sampled when the interrupt is taken.
+	void setIRQ(bool level, uint8_t vector) { irqLevel = level; irqVector = vector & 0x3F; }
+	bool isHalted() const { return halted; }
+
+	// Entry addresses derived from EXCPvec (cr3): bit 0 selects 16-byte (1)
+	// or 4-byte (0) vector spacing.
+	uint32_t generalVectorAddr() const;
+	uint32_t irqVectorAddr(uint8_t vector) const;
 
 	// Custom Engine result registers (a.k.a {HI,LO}). mul/mad/msb/div place
 	// their results here; mfcel/mfceh/mtcel/mtceh move between these and GPRs.
@@ -104,6 +114,13 @@ private:
 	// PC-relative branches and exception EPC capture, now that pc is a real
 	// byte address rather than a word index.
 	uint8_t  instrSize = 4;
+
+	// IRQ input (set via setIRQ), and sleep state.
+	bool     irqLevel  = false;
+	uint8_t  irqVector = 0;
+	bool     halted    = false;
+	// Condition flags saved on exception entry and restored by rte.
+	uint32_t condSaved = 0;
 
 	struct INSTRUCTION
 	{
@@ -245,6 +262,8 @@ private:
 		OP_ITYPE1   = 0x01,  // addi/ori/ldi/andi/cmpi (func3 selects)
 		OP_JX       = 0x02,  // j/jl: absolute jump (was 0x19)
 		OP_ITYPE_S  = 0x05,  // addis/andis/oris: shifted-immediate class
+		// CR-form: mfcr/mtcr/rte/drte/sleep (confirmed via score-elf-as).
+		OP_CRFORM   = 0x06,
 		OP_ANDRIX   = 0x0C,  // andri: rD=rA & imm14   confirmed
 		OP_ADDRIX   = 0x08,  // addri: rD=rA + imm14   (was 0x0D)
 		OP_ORRIX    = 0x0D,  // orri:  rD=rA | imm14   (was 0x0E)
@@ -314,11 +333,31 @@ private:
 		SYS_SCE   = 0x1C,   // sce        : store-combine end
 	};
 
-	// Exception cause codes (subset used by this emulator).
+	// Exception cause codes (ECR.Exc_code) from the Sunplus Linux score port.
 	enum EXC_CODE
 	{
-		EXC_SYSCALL = 7,
-		EXC_TRAP    = 10,
+		EXC_NMI       = 1,
+		EXC_ADEL_INSN = 2,
+		EXC_IBE       = 5,
+		EXC_PEL       = 6,
+		EXC_SYSCALL   = 7,
+		EXC_CCU       = 8,
+		EXC_RI        = 9,
+		EXC_TRAP      = 10,
+		EXC_ADEL_DATA = 11,
+		EXC_ADES_DATA = 12,
+		EXC_CEE       = 16,
+		EXC_CPE       = 17,
+		EXC_DBE       = 18,
+	};
+
+	// func6 within OP_CRFORM (bit 0 / CU distinguishes mfcr=1 from mtcr=0).
+	enum CRFORM_F6
+	{
+		CRF6_MOVCR = 0x00,
+		CRF6_RTE   = 0x02,
+		CRF6_DRTE  = 0x12,
+		CRF6_SLEEP = 0x22,
 	};
 
 	// func3 within OP_ITYPE1
@@ -520,6 +559,8 @@ private:
 	uint8_t SYSCALL();	// syscall    : unconditional system-call exception
 	uint8_t RTE();		// rte        : return from exception (PC = EPC)
 	uint8_t DRTE();		// drte       : debug return from exception (PC = DEPC)
+	uint8_t SLEEP();	// sleep      : halt until the IRQ line is asserted
+	uint8_t CRFORM();	// opcode 0x06 dispatcher
 	uint8_t LDCX();		// ldcx       : load coprocessor data register from memory
 	uint8_t STCX();		// stcx       : store coprocessor data register to memory
 
@@ -531,9 +572,13 @@ private:
 	uint8_t SCW();		// scw        : store-combine word
 	uint8_t SCE();		// sce        : store-combine end
 
-	// Minimal exception entry: save the faulting PC into EPC (cr5), record
-	// the cause in ECR (cr2), and vector to EXCPvec (cr3).
-	void raiseException(uint8_t code);
+	// Common exception/interrupt entry: shift PSR/condition state into the
+	// "saved" slots, save `epc`, and jump to `target`.
+	void enterException(uint8_t code, uint32_t epc, uint32_t target);
+	void raiseException(uint8_t code);	// synchronous: EPC = faulting instruction
+	void takeInterrupt();
+	// Seam for ECR.IM masking once its bit position is known.
+	bool irqMasked() const { return false; }
 
 	// Little-endian funnel that reconstructs an un-aligned word from two
 	// consecutive memory words (low part from LCR, high part from mem).

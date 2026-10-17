@@ -3,13 +3,14 @@
 // ============================================================
 // Conditional test (t{cond}), conditional/unconditional traps
 // (trap{cond}, syscall), exception returns (rte/drte), the
-// no-op system controls (sleep/cache/pflush/sdbbp/ceinst), and
-// coprocessor load/store (ldcx/stcx). All live under OP_SYS
-// (opcode 0x1F).
+// no-op system controls (cache/pflush/sdbbp/ceinst), and
+// coprocessor load/store (ldcx/stcx). rte/drte/sleep are CR-form
+// (opcode 0x06); the rest live under OP_SYS (opcode 0x1F) or R-type.
 //
-// Exception model (minimal): the faulting instruction address is
-// saved into EPC (cr5), the cause into ECR (cr2), and control
-// vectors to EXCPvec (cr3). rte returns to EPC, drte to DEPC (cr30).
+// Exception model: PSR.{UMs,IEs} <- {UMc,IEc} and the current pair is
+// cleared, the faulting instruction address goes to EPC (cr5), the
+// cause to ECR (cr2), and control vectors to EXCPvec (cr3) base + 0x200.
+// rte undoes the PSR shift and returns to EPC, drte to DEPC (cr30).
 // ============================================================
 
 // ---- t{cond} ----
@@ -43,9 +44,9 @@ TEST_F(CPUFixture, TCOND_Always_SetsT)
 // ---- trap{cond} ----
 TEST_F(CPUFixture, TRAPCOND_Always_VectorsToHandler)
 {
-    bus.cpu.cr[3] = 0x40;             // EXCPvec
+    bus.cpu.cr[3] = 0x40;             // EXCPvec, 4-byte spacing
     execute(encodeTRAPCOND(15));      // AL -> always trap
-    EXPECT_EQ(bus.cpu.pc, 0x40u);     // jumped to handler
+    EXPECT_EQ(bus.cpu.pc, 0x240u);    // general vector = base + 0x200
     EXPECT_EQ(bus.cpu.cr[2], 10u);    // ECR exc_code = trap
     EXPECT_EQ(bus.cpu.cr[5], 0u);     // EPC = faulting instr (was at pc 0)
 }
@@ -63,7 +64,7 @@ TEST_F(CPUFixture, TRAPCOND_EQ_TrapsWhenZeroSet)
     bus.cpu.cr[3] = 0x50;
     bus.cpu.status |= spg290::Z;
     execute(encodeTRAPCOND(4));       // EQ
-    EXPECT_EQ(bus.cpu.pc, 0x50u);
+    EXPECT_EQ(bus.cpu.pc, 0x250u);
     EXPECT_EQ(bus.cpu.cr[2], 10u);
 }
 
@@ -77,19 +78,59 @@ TEST_F(CPUFixture, TRAPCOND_EQ_NoTrapWhenZeroClear)
 // ---- syscall ----
 TEST_F(CPUFixture, SYSCALL_AlwaysTraps)
 {
-    bus.cpu.cr[3] = 0x60;
+    bus.cpu.cr[3] = 0x61;             // 16-byte spacing: mode bit set
     execute(encodeSYSCALL());
-    EXPECT_EQ(bus.cpu.pc, 0x60u);     // vectored to handler
+    EXPECT_EQ(bus.cpu.pc, 0x260u);    // vectored to base(0x60) + 0x200
     EXPECT_EQ(bus.cpu.cr[2], 7u);     // ECR exc_code = syscall
     EXPECT_EQ(bus.cpu.cr[5], 0u);     // EPC = syscall instruction
+}
+
+TEST_F(CPUFixture, Exception_ShiftsPSRAndClearsIE)
+{
+    bus.cpu.cr[0] = spg290::PSR_IEC;
+    execute(encodeSYSCALL());
+    EXPECT_EQ(bus.cpu.cr[0] & spg290::PSR_IEC, 0u);
+    EXPECT_NE(bus.cpu.cr[0] & spg290::PSR_IES, 0u);
+}
+
+TEST_F(CPUFixture, Exception_SecondEntryOverwritesSavedIE)
+{
+    bus.cpu.cr[0] = spg290::PSR_IEC;
+    execute(encodeSYSCALL());          // IEs = 1, IEc = 0
+    bus.write32(bus.cpu.pc, encodeSYSCALL());
+    bus.cpu.clock();                   // IEs <- IEc (0): single-level shadow
+    EXPECT_EQ(bus.cpu.cr[0] & spg290::PSR_IES, 0u);
+}
+
+TEST_F(CPUFixture, Exception_RteRestoresPSRAndFlags)
+{
+    bus.cpu.cr[0] = spg290::PSR_IEC;
+    bus.cpu.status |= spg290::C | spg290::Z;
+    execute(encodeSYSCALL());
+    bus.cpu.status = 0;                // handler clobbers the flags
+    execute(encodeRTE());
+    EXPECT_NE(bus.cpu.cr[0] & spg290::PSR_IEC, 0u);
+    EXPECT_EQ(getFlag(spg290::C), 1u);
+    EXPECT_EQ(getFlag(spg290::Z), 1u);
+    EXPECT_EQ(bus.cpu.pc, 0u);         // EPC = the syscall itself
+}
+
+TEST_F(CPUFixture, CR1_MapsToConditionFlags)
+{
+    bus.cpu.status = spg290::C | spg290::T;
+    execute(encodeMFCR(4, 1));
+    EXPECT_EQ(getReg(4), (uint32_t)(spg290::C | spg290::T));
+    setReg(5, spg290::Z);
+    execute(encodeMTCR(5, 1));
+    EXPECT_EQ(bus.cpu.status, (uint32_t)spg290::Z);
 }
 
 // ---- rte / drte ----
 TEST_F(CPUFixture, RTE_ReturnsToEPC)
 {
-    bus.cpu.cr[5] = 0x55;             // EPC
+    bus.cpu.cr[5] = 0x55;             // EPC (bit 0 is masked off)
     execute(encodeRTE());
-    EXPECT_EQ(bus.cpu.pc, 0x55u);
+    EXPECT_EQ(bus.cpu.pc, 0x54u);
 }
 
 TEST_F(CPUFixture, DRTE_ReturnsToDEPC)
@@ -103,8 +144,6 @@ TEST_F(CPUFixture, DRTE_ReturnsToDEPC)
 TEST_F(CPUFixture, SystemNoOps_AdvanceWithoutSideEffects)
 {
     bus.cpu.status |= spg290::C;       // flags must survive untouched
-    execute(encodeSLEEP());
-    EXPECT_EQ(bus.cpu.pc, 4u);
     execute(encodeCACHE());
     execute(encodePFLUSH());
     execute(encodeSDBBP32());

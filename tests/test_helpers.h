@@ -104,6 +104,25 @@ protected:
 
     bool     romPassed() const { return bus.read32(ROM_RESULT_ADDR) == PASS_VALUE; }
     uint32_t romResult() const { return bus.read32(ROM_RESULT_ADDR); }
+
+    // Like runROM, but raises a PPU vblank-start event every `period` clocks
+    // (period 0 = never), standing in for the Phase 4 video timing.
+    void runROMWithVBlank(const uint32_t* prog, size_t len, uint32_t period,
+                          uint32_t max_cycles = 200000)
+    {
+        bus.loadROM(prog, len);
+        for (uint32_t i = 0; i < max_cycles; ++i)
+        {
+            if (bus.read32(ROM_DONE_ADDR) != 0)
+                break;
+            if (period != 0 && i % period == period - 1)
+            {
+                bus.ppu.signalVBlankStart();
+                bus.updateIRQ();
+            }
+            bus.cpu.clock();
+        }
+    }
 };
 
 
@@ -628,8 +647,18 @@ static inline uint32_t encSYS(uint8_t sub, uint8_t d, uint8_t regnum, uint8_t cp
          | ((uint32_t)(sub & 0x1F) << 10)
          | ((uint32_t)(cp_hilo & 0x3) << 8);
 }
-static inline uint32_t encodeMFCR(uint8_t d, uint8_t crn)  { return encSYS(0x00, d, crn, 0); }
-static inline uint32_t encodeMTCR(uint8_t d, uint8_t crn)  { return encSYS(0x01, d, crn, 0); }
+// CR-form (opcode 0x06), confirmed via score-elf-as. mfcr/mtcr share func6 0
+// and differ in CU (1 = mfcr, 0 = mtcr); rD = GPR, rA = control register.
+static inline uint32_t encCR(uint8_t func6, uint8_t d, uint8_t crn, bool cu)
+{
+    return 0x80000000u | ((uint32_t)0x06 << 26)
+         | ((uint32_t)(d & 0x1F) << 21)
+         | ((uint32_t)(crn & 0x1F) << 16)
+         | ((uint32_t)(func6 & 0x3F) << 1)
+         | (cu ? 1u : 0u);
+}
+static inline uint32_t encodeMFCR(uint8_t d, uint8_t crn)  { return encCR(0x00, d, crn, true); }
+static inline uint32_t encodeMTCR(uint8_t d, uint8_t crn)  { return encCR(0x00, d, crn, false); }
 // mfsr/mtsr: confirmed via score-elf-as to be ordinary R-type instructions
 // (func6 0x28/0x29), not OP_SYS sub-ops -- see spg290.h. mtsr's rD/rA roles
 // are swapped relative to mfsr (rD=srn, rA=source register).
@@ -649,9 +678,9 @@ static inline uint32_t encodeTCOND(uint8_t ec)    { return encSYS(0x0B, 0, ec, 0
 // (func6 0x02/0x01), not OP_SYS sub-ops. trap{cond}'s EC lives in the rB field.
 static inline uint32_t encodeTRAPCOND(uint8_t ec) { return encR(0x02, 0, 0, ec, false); }
 static inline uint32_t encodeSYSCALL()            { return encR(0x01, 0, 0, 0, false); }
-static inline uint32_t encodeRTE()                { return encSYS(0x0E, 0, 0, 0); }
-static inline uint32_t encodeDRTE()               { return encSYS(0x0F, 0, 0, 0); }
-static inline uint32_t encodeSLEEP()              { return encSYS(0x10, 0, 0, 0); }
+static inline uint32_t encodeRTE()                { return encCR(0x02, 0, 0, false); }
+static inline uint32_t encodeDRTE()               { return encCR(0x12, 0, 0, false); }
+static inline uint32_t encodeSLEEP()              { return encCR(0x22, 0, 0, false); }
 static inline uint32_t encodeCACHE()              { return encSYS(0x11, 0, 0, 0); }
 static inline uint32_t encodePFLUSH()             { return encSYS(0x12, 0, 0, 0); }
 static inline uint32_t encodeSDBBP32()            { return encSYS(0x13, 0, 0, 0); }
