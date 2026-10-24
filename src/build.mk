@@ -2,6 +2,22 @@
 CXX = g++
 CXXFLAGS = -Wall -Wextra -std=c++17
 
+# Path to googletest build artifacts
+GTEST_LIB_DIR = ../third_party/googletest/build/lib
+GTEST_INCLUDE_DIR = ../third_party/googletest/googletest/include
+
+# Default Linker Flags
+LDFLAGS = -lgtest -lgtest_main -pthread
+
+# Configuration to support both Windows (local) and Linux (system)
+# If GTEST_LIB_DIR is provided (Windows builds), we use the local paths.
+# If it's empty (Linux builds), we use the system default.
+ifneq ($(GTEST_LIB_DIR),)
+# Windows / Local Build mode
+CXXFLAGS += "-I$(GTEST_INCLUDE_DIR)"
+LDFLAGS += "-L$(GTEST_LIB_DIR)"
+endif
+
 #target exe
 TARGET = main
 
@@ -13,7 +29,7 @@ all: $(TARGET)
 
 # Link the files
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 # compile main
 main.o: main.cpp Bus.o spg290.o
@@ -53,7 +69,7 @@ test: $(TEST_TARGET)
 	./$(TEST_TARGET)
 
 $(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o $(TEST_OBJS)
-	$(CXX) $(CXXFLAGS) $^ -o $@ -lgtest -lgtest_main -pthread
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 # Compile test sources with -I. so they can find Bus.h / spg290.h
 ../tests/%.o: ../tests/%.cpp
@@ -92,4 +108,3 @@ roms: $(ROM_HDRS)
 
 ../tests/roms/generated/%.h: ../tests/roms/generated/%.bin
 	$(BIN_TO_CPP) $< $@
-

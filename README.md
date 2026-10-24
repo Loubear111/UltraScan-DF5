@@ -37,10 +37,10 @@ tools/
 
 ### Prerequisites
 
-| Tool | Install command |
-|------|----------------|
-| g++ (C++17) | `sudo apt-get install build-essential` |
-| Google Test  | `sudo apt-get install libgtest-dev` |
+| Tool | Linux Install | Windows Setup |
+|------|--------------|---------------|
+| g++ (C++17) | `sudo apt-get install build-essential` | [see below](#windows-support) |
+| Google Test  | `sudo apt-get install libgtest-dev` | [see below](#windows-support) |
 
 ### Run all tests
 
@@ -55,8 +55,8 @@ This compiles the emulator, compiles every `tests/*.cpp` file, links them
 against gtest, and runs the test binary.  Expected output:
 
 ```
-[==========] 322 tests from 2 test suites ran.
-[  PASSED  ] 322 tests.
+[==========] 428 tests from 11 test suites ran.
+[  PASSED  ] 428 tests.
 ```
 
 ### Run a specific test or filter by name
@@ -73,6 +73,17 @@ cd src
 cd src
 make -f build.mk clean
 ```
+
+### Windows Support
+
+If you are on Windows, we provide an onboarding script to automate the installation of GoogleTest dependencies.
+
+1. Open a PowerShell terminal in the project root.
+2. Run the setup script:
+   ```powershell
+   .\scripts\setup_windows.ps1
+   ```
+3. Once complete, follow the standard instructions above to run the tests.
 
 ---
 
