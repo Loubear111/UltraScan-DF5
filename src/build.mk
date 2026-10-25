@@ -22,7 +22,7 @@ endif
 TARGET = main
 
 #all objects 
-OBJS = main.o Bus.o spg290.o ppu.o IRQController.o
+OBJS = main.o Bus.o spg290.o ppu.o IRQController.o DiscImage.o
 
 # Default target
 all: $(TARGET)
@@ -47,6 +47,10 @@ Bus.o: Bus.cpp Bus.h ppu.o IRQController.o
 IRQController.o: IRQController.cpp IRQController.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+# compile disc image reader
+DiscImage.o: DiscImage.cpp DiscImage.h
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 # compile ppu
 ppu.o: ppu.cpp ppu.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -68,7 +72,7 @@ TEST_TARGET = ../tests/test_runner
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
 
-$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o $(TEST_OBJS)
+$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o DiscImage.o $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 # Compile test sources with -I. so they can find Bus.h / spg290.h

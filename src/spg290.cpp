@@ -82,22 +82,22 @@ void spg290::clock()
 			return;
 		}
 
-		// Fetch one halfword at a time: Score7 instructions are 16-bit or
-		// 32-bit, byte-addressed and packed at their natural size (not one
-		// fixed-width slot per instruction). The halfword's own MSB is the
-		// "P-bit": 1 starts a 32-bit instruction (fetch the halfword that
-		// follows too), 0 means it is itself a complete 16-bit instruction.
-		uint16_t hi = readHalf(pc);
-		if (hi & 0x8000u)
+		// Score7 instructions are 16-bit or 32-bit, byte-addressed and packed
+		// at their natural size (not one fixed-width slot per instruction).
+		// The first halfword's own MSB is the "P-bit": 1 starts a 32-bit
+		// instruction (fetch the whole word at pc, in the Bus's byte order,
+		// so no endian-specific code is needed here), 0 means it is itself a
+		// complete 16-bit instruction.
+		uint16_t first = readHalf(pc);
+		if (first & 0x8000u)
 		{
-			uint16_t lo = readHalf(pc + 2);
-			instr = ((uint32_t)hi << 16) | lo;
+			instr = readWord(pc);
 			instrSize = 4;
 			pc += 4;
 		}
 		else
 		{
-			instr = hi;   // decode16() reads this back out of the low 16 bits
+			instr = first;   // decode16() reads this back out of the low 16 bits
 			instrSize = 2;
 			pc += 2;
 		}
