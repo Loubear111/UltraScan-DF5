@@ -253,6 +253,22 @@ public:
 
 	void reset();
 
+	// --- IRQ (P_IRQ_Control enables / P_IRQ_Status flags share bit positions) ---
+	static constexpr uint32_t IRQ_BLK_ST  = 1u << 0; // vblank start
+	static constexpr uint32_t IRQ_BLK_END = 1u << 1; // vblank end
+	static constexpr uint32_t IRQ_HV      = 1u << 2; // H/V position hit
+	static constexpr uint32_t IRQ_MASK    = 0x7u;
+
+	// Event hooks for whoever owns video timing. A flag is only latched while
+	// its enable bit is set.
+	void signalVBlankStart() { latchIRQ(IRQ_BLK_ST); }
+	void signalVBlankEnd()   { latchIRQ(IRQ_BLK_END); }
+	void signalHVHit()       { latchIRQ(IRQ_HV); }
+
+	bool blkStartLine() const { return irqLine(IRQ_BLK_ST); }
+	bool blkEndLine()   const { return irqLine(IRQ_BLK_END); }
+	bool hvLine()       const { return irqLine(IRQ_HV); }
+
 	// --- Typed global-register accessors -----------------------------
 	bool       ppuEnabled()  const { return (m_ctrl[P_PPU_Control / 4] & PPUEN_BIT) != 0; }
 	Resolution resolution()  const { return (Resolution)(m_ctrl[P_PPU_Control / 4] & RES_MASK); }
@@ -402,6 +418,15 @@ private:
 	static uint32_t offsetOf(uint32_t addr) { return (addr >= BASE) ? (addr - BASE) : addr; }
 	static uint32_t textReg(int layer, uint32_t field) { return TEXT_BASE + layer * TEXT_STRIDE + field; }
 	uint32_t ctrlAt(uint32_t off) const { return m_ctrl[(off / 4) & 0x3F]; }
+
+	void latchIRQ(uint32_t bit)
+	{
+		if (m_ctrl[P_IRQ_Control / 4] & bit) m_ctrl[P_IRQ_Status / 4] |= bit;
+	}
+	bool irqLine(uint32_t bit) const
+	{
+		return (m_ctrl[P_IRQ_Control / 4] & m_ctrl[P_IRQ_Status / 4] & bit) != 0;
+	}
 
 	static int32_t signExtend(uint32_t v, int bits)
 	{

@@ -68,6 +68,20 @@ void spg290::clock()
 {
 	if (cycles == 0)
 	{
+		// Sleep ends when the IRQ line is asserted, whether or not it is taken.
+		if (halted)
+		{
+			if (!irqLevel) return;
+			halted = false;
+		}
+
+		// Level-sensitive IRQ, sampled between instructions.
+		if (irqLevel && (cr[0] & PSR_IEC) && !irqMasked())
+		{
+			takeInterrupt();
+			return;
+		}
+
 		// Fetch one halfword at a time: Score7 instructions are 16-bit or
 		// 32-bit, byte-addressed and packed at their natural size (not one
 		// fixed-width slot per instruction). The halfword's own MSB is the
@@ -240,6 +254,7 @@ void spg290::clock()
 			break;
 		}
 		case OP_ANDRIX: ANDRIX(); break;
+		case OP_CRFORM: CRFORM(); break;
 		case OP_ADDRIX: ADDRIX(); break;
 		case OP_ORRIX:  ORRIX();  break;
 		case OP_SUBRIX: SUBRIX(); break;
@@ -2232,7 +2247,7 @@ uint8_t spg290::MFCR()
 {
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
     uint8_t regnum = (instr & 0x1F0000) >> 16;
-    writeReg(d_reg, cr[regnum]);
+    writeReg(d_reg, regnum == 1 ? status : cr[regnum]);
     return 1;
 }
 
@@ -2240,7 +2255,8 @@ uint8_t spg290::MTCR()
 {
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
     uint8_t regnum = (instr & 0x1F0000) >> 16;
-    cr[regnum] = regs[d_reg];
+    if (regnum == 1) status = regs[d_reg];
+    else             cr[regnum] = regs[d_reg];
     return 1;
 }
 
@@ -2348,15 +2364,49 @@ uint8_t spg290::TCOND()
     return 1;
 }
 
-// Minimal exception entry. The faulting instruction sits at pc-instrSize
-// (pc has already advanced past it); save that address in EPC (cr5), record
-// the cause in ECR (cr2), and vector to the handler address held in
-// EXCPvec (cr3).
+// Vector addresses from EXCPvec (cr3): bit 0 selects 16- vs 4-byte spacing.
+// The general vector is base+0x200; IRQ n follows at base+0x200+spacing*(n+1).
+uint32_t spg290::generalVectorAddr() const
+{
+    return (cr[3] & ~1u) + 0x200u;
+}
+
+uint32_t spg290::irqVectorAddr(uint8_t vector) const
+{
+    uint32_t spacing = (cr[3] & 1u) ? 0x10u : 0x04u;
+    return generalVectorAddr() + spacing * ((uint32_t)vector + 1u);
+}
+
+// Shift the current PSR pair into the saved pair, enter kernel mode with
+// interrupts disabled, save the condition flags and EPC, then jump.
+void spg290::enterException(uint8_t code, uint32_t epc, uint32_t target)
+{
+    uint32_t psr = cr[0];
+    uint32_t next = psr & ~(PSR_UMS | PSR_IES | PSR_UMC | PSR_IEC);
+    if (psr & PSR_UMC) next |= PSR_UMS;
+    if (psr & PSR_IEC) next |= PSR_IES;
+    cr[0] = next;
+
+    condSaved = status;
+    cr[2] = (cr[2] & ~ECR_CODE_MASK) | (code & ECR_CODE_MASK);
+    cr[5] = epc;
+    pc = target;
+    halted = false;
+}
+
+// Synchronous exceptions report the faulting instruction, which sits at
+// pc-instrSize (pc has already advanced past it).
 void spg290::raiseException(uint8_t code)
 {
-    cr[5] = pc - instrSize;
-    cr[2] = code;
-    pc = cr[3];
+    enterException(code, pc - instrSize, generalVectorAddr());
+}
+
+// Hardware IRQs are taken between instructions: EPC is the next instruction.
+void spg290::takeInterrupt()
+{
+    uint8_t vector = irqVector;
+    enterException(0, pc, irqVectorAddr(vector));
+    cr[2] = (cr[2] & ~ECR_VECTOR_MASK) | ((uint32_t)vector << ECR_VECTOR_SHIFT);
 }
 
 // trap{cond}: raise a trap exception when the condition holds, otherwise it is
@@ -2378,10 +2428,16 @@ uint8_t spg290::SYSCALL()
     return 1;
 }
 
-// rte: return from exception -> PC = EPC (cr5).
+// rte: restore the current PSR pair and condition flags from the saved ones
+// and return to EPC (bit 0 is masked off).
 uint8_t spg290::RTE()
 {
-    pc = cr[5];
+    uint32_t psr = cr[0] & ~(PSR_UMC | PSR_IEC);
+    if (cr[0] & PSR_UMS) psr |= PSR_UMC;
+    if (cr[0] & PSR_IES) psr |= PSR_IEC;
+    cr[0] = psr;
+    status = condSaved;
+    pc = cr[5] & ~1u;
     return 1;
 }
 
@@ -2390,6 +2446,27 @@ uint8_t spg290::DRTE()
 {
     pc = cr[30];
     return 1;
+}
+
+// sleep: stop fetching until the IRQ line is asserted (see clock()).
+uint8_t spg290::SLEEP()
+{
+    halted = true;
+    return 1;
+}
+
+// CR-form (opcode 0x06): func6 selects the instruction; mfcr/mtcr share
+// func6 0 and are told apart by the CU bit (1 = mfcr, 0 = mtcr).
+uint8_t spg290::CRFORM()
+{
+    switch ((instr & func6_MASK) >> 1)
+    {
+    case CRF6_MOVCR: return (instr & CU_MASK) ? MFCR() : MTCR();
+    case CRF6_RTE:   return RTE();
+    case CRF6_DRTE:  return DRTE();
+    case CRF6_SLEEP: return SLEEP();
+    default:         return 1;
+    }
 }
 
 // ldcx: load a coprocessor data register from memory at GPRrD + sext(imm).

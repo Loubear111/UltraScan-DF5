@@ -24,6 +24,11 @@
     .long (0x80000000 | (0x14 << 26) | ((\rd) << 21) | ((\ra) << 16) | (((\wo) & 0x7FFF) << 1))
 .endm
 
+/* lw_e: OP_LW=0x10, same emulator imm format as sw_e. */
+.macro lw_e rd, ra, wo
+    .long (0x80000000 | (0x10 << 26) | ((\rd) << 21) | ((\ra) << 16) | (((\wo) & 0x7FFF) << 1))
+.endm
+
 /* j_e: OP_JX=0x02 (confirmed), 24-bit absolute word address. */
 .macro j_e wa
     .long (0x80000000 | (0x02 << 26) | (((\wa) & 0xFFFFFF) << 1))

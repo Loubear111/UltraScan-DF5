@@ -48,7 +48,10 @@ void PPU::write32(uint32_t addr, uint32_t data)
 {
 	uint32_t off = offsetOf(addr);
 
-	if (off < 0x1000)
+	// Status flags are write-1-to-clear so a handler can acknowledge them.
+	if (off == P_IRQ_Status)
+		m_ctrl[P_IRQ_Status / 4] &= ~data;
+	else if (off < 0x1000)
 		m_ctrl[(off >> 2) & 0x3F] = data;
 	else if (off >= PALETTE_BASE && off < PALETTE_BASE + 0x800)
 		m_palette[(off - PALETTE_BASE) >> 2] = data;
