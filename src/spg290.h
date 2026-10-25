@@ -70,7 +70,8 @@ public:
 	uint32_t copCtrl[4][32] = {{0}};
 
 	// General-purpose registers r0..r31.
-	// r0 is hardwired to 0 — writes are silently ignored (see writeReg()).
+	// r0 is the stack pointer, a normal writable register.
+	// r1 = assembler temp, r2 = frame/base pointer, r3 = link register.
 	uint32_t regs[32] = {0};
 
 	// I don't think SPG290 has an accumulator, so we probs don't need this
@@ -102,7 +103,7 @@ private:
 	void     writeHalf(uint32_t a, uint16_t d);
 	uint32_t readWord(uint32_t a);
 	void     writeWord(uint32_t a, uint32_t d);
-	// Write to a GPR, ignoring writes to r0 (hardwired zero).
+	// Write to a GPR (r0 is the stack pointer and is writable).
 	void    writeReg(uint8_t r, uint32_t val);
 
 	void	SetFlag(FLAGS290 f, bool v);

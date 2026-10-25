@@ -378,13 +378,14 @@ static inline uint32_t encodeMSBU(uint8_t a, uint8_t b) { return encR(EF6_MSBU, 
 static inline uint32_t encodeMULF(uint8_t a, uint8_t b) { return encR(0x15, 0, a, b, false); }
 static inline uint32_t encodeMADF(uint8_t a, uint8_t b) { return encR(0x16, 0, a, b, false); }
 
-// --- Loads / stores : opcode, rD, rA, signed Imm15[15:1] ---
+// --- Loads / stores : opcode, rD, rA, signed Imm15[14:0]; bit 15 is the P-bit ---
 static inline uint32_t encLS(uint32_t opcode, uint8_t d, uint8_t a, uint16_t imm15)
 {
     return 0x80000000u | ((opcode & 0x1F) << 26)
          | ((uint32_t)(d & 0x1F) << 21)
          | ((uint32_t)(a & 0x1F) << 16)
-         | ((uint32_t)(imm15 & 0x7FFF) << 1);
+         | (1u << 15)
+         | ((uint32_t)(imm15 & 0x7FFF));
 }
 static inline uint32_t encodeLW(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x10, d, a, imm); }  // OP_LW=0x10 confirmed
 static inline uint32_t encodeLH(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x11, d, a, imm); }  // OP_LH=0x11 (was 0x15)
@@ -397,15 +398,16 @@ static inline uint32_t encodeSB(uint8_t d, uint8_t a, uint16_t imm)  { return en
 
 // --- Control flow ---
 // b{cond}/b{cond}l share one real opcode (0x04); CU bit selects the link
-// form. BC at bits13:10, split 19-bit displacement (Disp[18:9] at bits24:15,
-// Disp[8:0] at bits9:1) -- confirmed via score-elf-as, see spg290.cpp.
+// form. BC at bits13:10, split 19-bit displacement (Disp[18:9] at bits25:16,
+// Disp[8:0] at bits9:1, bit 15 is the P-bit).
 static inline uint32_t encodeBC(uint8_t bc, int32_t disp19, bool link)
 {
     uint32_t d = (uint32_t)disp19 & 0x7FFFF;
     uint32_t hi = (d >> 9) & 0x3FF;
     uint32_t lo = d & 0x1FF;
     return 0x80000000u | (0x04u << 26)
-         | (hi << 15)
+         | (hi << 16)
+         | (1u << 15)
          | ((uint32_t)(bc & 0xF) << 10)
          | (lo << 1)
          | (link ? 1u : 0u);
@@ -414,8 +416,11 @@ static inline uint32_t encodeBCOND(uint8_t bc, int32_t disp)  { return encodeBC(
 static inline uint32_t encodeBCONDL(uint8_t bc, int32_t disp) { return encodeBC(bc, disp, true); }
 static inline uint32_t encodeJX(uint32_t disp24, bool lk)
 {
+    // Disp24[23:14] -> bits 25:16, Disp24[13:0] -> bits 14:1, bit 15 = P-bit.
     return 0x80000000u | (0x02u << 26)  // OP_JX=0x02 (was 0x19)
-         | ((disp24 & 0xFFFFFF) << 1)
+         | (((disp24 >> 14) & 0x3FFu) << 16)
+         | (1u << 15)
+         | ((disp24 & 0x3FFFu) << 1)
          | (lk ? 1u : 0u);
 }
 static inline uint32_t encodeBR(uint8_t bc, uint8_t a)

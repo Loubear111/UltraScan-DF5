@@ -19,24 +19,24 @@
     ori     r\rd, \imm
 .endm
 
-/* sw_e: OP_SW=0x14 (confirmed), emulator imm format bits 15:1. */
+/* sw_e: OP_SW=0x14 (confirmed), Imm15 at bits 14:0, bit 15 = P-bit. */
 .macro sw_e rd, ra, wo
-    .long (0x80000000 | (0x14 << 26) | ((\rd) << 21) | ((\ra) << 16) | (((\wo) & 0x7FFF) << 1))
+    .long (0x80000000 | (0x14 << 26) | ((\rd) << 21) | ((\ra) << 16) | 0x8000 | ((\wo) & 0x7FFF))
 .endm
 
-/* lw_e: OP_LW=0x10, same emulator imm format as sw_e. */
+/* lw_e: OP_LW=0x10, same format as sw_e. */
 .macro lw_e rd, ra, wo
-    .long (0x80000000 | (0x10 << 26) | ((\rd) << 21) | ((\ra) << 16) | (((\wo) & 0x7FFF) << 1))
+    .long (0x80000000 | (0x10 << 26) | ((\rd) << 21) | ((\ra) << 16) | 0x8000 | ((\wo) & 0x7FFF))
 .endm
 
-/* j_e: OP_JX=0x02 (confirmed), 24-bit absolute word address. */
+/* j_e: OP_JX=0x02 (confirmed), 24-bit absolute word address.
+ * Disp24[23:14] at bits 25:16, Disp24[13:0] at bits 14:1, bit 15 = P-bit. */
 .macro j_e wa
-    .long (0x80000000 | (0x02 << 26) | (((\wa) & 0xFFFFFF) << 1))
+    .long (0x80000000 | (0x02 << 26) | (((((\wa) >> 14) & 0x3FF)) << 16) | 0x8000 | (((\wa) & 0x3FFF) << 1))
 .endm
 
-/* beq_e: 32-bit BCOND opcode=0x04 (confirmed via score-elf-as; see
- * /memories/session/phase2-isa-audit.md), bc=4 (EQ), split 19-bit disp:
- * Disp[18:9] at bits24:15, Disp[8:0] at bits9:1. */
+/* beq_e: 32-bit BCOND opcode=0x04 (confirmed via score-elf-as), bc=4 (EQ),
+ * split 19-bit disp: Disp[18:9] at bits25:16, bit 15 = P-bit, Disp[8:0] at bits9:1. */
 .macro beq_e disp
-    .long (0x80000000 | (0x04 << 26) | ((((\disp) >> 9) & 0x3FF) << 15) | (4 << 10) | (((\disp) & 0x1FF) << 1))
+    .long (0x80000000 | (0x04 << 26) | ((((\disp) >> 9) & 0x3FF) << 16) | 0x8000 | (4 << 10) | (((\disp) & 0x1FF) << 1))
 .endm

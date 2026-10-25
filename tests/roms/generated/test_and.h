@@ -14,16 +14,16 @@ static const uint32_t rom_test_and[] = {
     0x80618821u,  // [  2]  word address 0x0002
     0x8480801Eu,  // [  3]  word address 0x0003
     0x80A39015u,  // [  4]  word address 0x0004
-    0x90001010u,  // [  5]  word address 0x0005
+    0x90009010u,  // [  5]  word address 0x0005
     0x84C08002u,  // [  6]  word address 0x0006
-    0x88000028u,  // [  7]  word address 0x0007
+    0x88008028u,  // [  7]  word address 0x0007
     0x80008000u,  // [  8]  word address 0x0008
     0x84D7BD5Au,  // [  9]  word address 0x0009
     0x8517FE00u,  // [ 10]  word address 0x000A
-    0xD0C80008u,  // [ 11]  word address 0x000B
+    0xD0C88004u,  // [ 11]  word address 0x000B
     0x84E08002u,  // [ 12]  word address 0x000C
-    0xD0E80000u,  // [ 13]  word address 0x000D
-    0x88000038u,  // [ 14]  word address 0x000E
+    0xD0E88000u,  // [ 13]  word address 0x000D
+    0x88008038u,  // [ 14]  word address 0x000E
 };
 
 static const size_t rom_test_and_len = sizeof(rom_test_and) / sizeof(rom_test_and[0]);

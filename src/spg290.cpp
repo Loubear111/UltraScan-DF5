@@ -45,8 +45,8 @@ void spg290::writeWord(uint32_t a, uint32_t d)
 
 void spg290::writeReg(uint8_t r, uint32_t val)
 {
-	if (r != 0)
-		regs[r] = val;
+	// r0 is the stack pointer, a normal writable register (not a hardwired zero).
+	regs[r] = val;
 }
 
 // Returns the value of a specific bit of the status register
@@ -1554,7 +1554,7 @@ uint8_t spg290::LW()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int32_t imm   = (instr >> 1) & 0x7FFF;
+    int32_t imm   = instr & 0x7FFF;               // Imm15 = bits 14:0 (bit 15 is the P-bit)
     imm = (imm << 17) >> 17;                       // sign-extend 15-bit
     uint32_t addr = regs[a_reg] + (uint32_t)imm;
     writeReg(d_reg, readWord(addr));
@@ -1565,7 +1565,7 @@ uint8_t spg290::SW()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int32_t imm   = (instr >> 1) & 0x7FFF;
+    int32_t imm   = instr & 0x7FFF;
     imm = (imm << 17) >> 17;
     uint32_t addr = regs[a_reg] + (uint32_t)imm;
     writeWord(addr, regs[d_reg]);
@@ -1576,7 +1576,7 @@ uint8_t spg290::LBU()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int32_t imm   = (instr >> 1) & 0x7FFF;
+    int32_t imm   = instr & 0x7FFF;
     imm = (imm << 17) >> 17;
     uint32_t addr = regs[a_reg] + (uint32_t)imm;
     writeReg(d_reg, readByte(addr));
@@ -1587,7 +1587,7 @@ uint8_t spg290::LB()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int32_t imm   = (instr >> 1) & 0x7FFF;
+    int32_t imm   = instr & 0x7FFF;
     imm = (imm << 17) >> 17;
     uint32_t addr = regs[a_reg] + (uint32_t)imm;
     writeReg(d_reg, (uint32_t)(int32_t)(int8_t)readByte(addr));
@@ -1598,7 +1598,7 @@ uint8_t spg290::LHU()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int32_t imm   = (instr >> 1) & 0x7FFF;
+    int32_t imm   = instr & 0x7FFF;
     imm = (imm << 17) >> 17;
     uint32_t addr = regs[a_reg] + (uint32_t)imm;
     writeReg(d_reg, readHalf(addr));
@@ -1609,7 +1609,7 @@ uint8_t spg290::LH()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int32_t imm   = (instr >> 1) & 0x7FFF;
+    int32_t imm   = instr & 0x7FFF;
     imm = (imm << 17) >> 17;
     uint32_t addr = regs[a_reg] + (uint32_t)imm;
     writeReg(d_reg, (uint32_t)(int32_t)(int16_t)readHalf(addr));
@@ -1620,7 +1620,7 @@ uint8_t spg290::SB()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int32_t imm   = (instr >> 1) & 0x7FFF;
+    int32_t imm   = instr & 0x7FFF;
     imm = (imm << 17) >> 17;
     uint32_t addr = regs[a_reg] + (uint32_t)imm;
     writeByte(addr, (uint8_t)regs[d_reg]);
@@ -1631,7 +1631,7 @@ uint8_t spg290::SH()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int32_t imm   = (instr >> 1) & 0x7FFF;
+    int32_t imm   = instr & 0x7FFF;
     imm = (imm << 17) >> 17;
     uint32_t addr = regs[a_reg] + (uint32_t)imm;
     writeHalf(addr, (uint16_t)regs[d_reg]);
@@ -1642,17 +1642,15 @@ uint8_t spg290::SH()
 // pc is now a real byte address, already advanced past the current
 // instruction by the time these execute, so PCcurrent == (pc - instrSize).
 //
-// BC-form bit layout (opcode 0x04, confirmed empirically via score-elf-as --
-// brute-force fit against known branch targets, documented in
-// /memories/session/phase2-isa-audit.md): bits24:15 = Disp[18:9], bit14 =
-// reserved, bits13:10 = BC (condition code), bits9:1 = Disp[8:0], bit0 = CU
+// BC-form bit layout (opcode 0x04, with the P-bits excluded from the
+// displacement): bits25:16 = Disp[18:9], bit15 = P-bit, bit14 = reserved,
+// bits13:10 = BC (condition code), bits9:1 = Disp[8:0], bit0 = CU
 // (0=b{cond}, 1=b{cond}l). The two displacement halves concatenate into a
 // 19-bit signed halfword count; the final byte offset is disp<<1, added to
-// PCcurrent (confirmed from s_core7.pdf's "PC = PCcurrent + SignExtend({Disp,
-// 1'b0})" operation).
+// PCcurrent (PC = PCcurrent + SignExtend({Disp, 1'b0})).
 static inline int32_t decodeBCondDisp19(uint32_t instr)
 {
-    uint32_t hi = (instr >> 15) & 0x3FFu;   // bits 24:15
+    uint32_t hi = (instr >> 16) & 0x3FFu;   // bits 25:16
     uint32_t lo = (instr >> 1) & 0x1FFu;    // bits 9:1
     int32_t disp = (int32_t)((hi << 9) | lo);
     return (disp << 13) >> 13;               // sign-extend 19 bits
@@ -1671,7 +1669,8 @@ uint8_t spg290::BCOND()
 
 uint8_t spg290::JX()
 {
-    uint32_t disp = (instr >> 1) & 0xFFFFFF;        // 24-bit displacement (halfwords)
+    // Disp24 = bits 25:16 (upper 10) | bits 14:1 (lower 14); bit 15 is the P-bit.
+    uint32_t disp = (((instr >> 16) & 0x3FFu) << 14) | ((instr >> 1) & 0x3FFFu);
     uint8_t  lk   = instr & 0x1;
 
     if (lk)

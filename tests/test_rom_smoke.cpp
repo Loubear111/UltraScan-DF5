@@ -11,7 +11,7 @@
 //   - ROM writes 1 to ROM_DONE_ADDR to signal completion.
 //
 // Instructions used (all dispatched in clock()):
-//   ADDIX r, imm16   : r += sext(imm16)  (r0 always 0 → load immediate)
+//   ADDIX r, imm16   : r += sext(imm16)  (registers start at 0 → load immediate)
 //   ORIX  r, imm16   : r |= zero_ext(imm16)  (loads values > 0x7FFF)
 //   ANDX  rD, rA, rB : rD = rA & rB, updates flags
 //   SUBX  rD, rA, rB : rD = rA - rB, updates flags (sets Z if equal)
@@ -112,7 +112,7 @@ TEST_F(ROMFixture, ANDX_SmokeROM_FailsWithWrongExpected)
 //
 // Instructions used (all dispatched in clock()):
 //   ORIX  r, 0xDEAD  : r = r0 | 0xDEAD  (zero-extended → 0x0000DEAD)
-//   ADDIX r, imm16   : r = r + sext(imm) (r0 always 0 → load immediate)
+//   ADDIX r, imm16   : r = r + sext(imm) (registers start at 0 → load immediate)
 //   ANDX  rD, rA, rB : rD = rA & rB
 //   SUBX  rD, rA, rB : rD = rA - rB, sets Z flag if equal
 //   BCOND bc, disp   : branch if condition holds (bc=4 → EQ/Z set)
@@ -125,7 +125,8 @@ TEST_F(ROMFixture, ANDX_SmokeROM_FailsWithWrongExpected)
 //   [0xFF00]   : ROM_DONE_ADDR
 //   [0xFF01]   : ROM_RESULT_ADDR
 
-// Helper: r0 is hardwired to 0, so  ADDIX rD, imm  loads sext(imm) into rD.
+// Helper: registers start at 0 (r0 is the SP, left unwritten here), so
+//         ADDIX rD, imm  loads sext(imm) into rD.
 //         ORIX  rD, imm  loads zero_ext(imm) into rD (from r0=0 base).
 
 // -----------------------------------------------------------------

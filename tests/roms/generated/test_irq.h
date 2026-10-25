@@ -14,21 +14,21 @@ static const uint32_t rom_test_irq[] = {
     0x963A9002u,  // [  2]  word address 0x0002
     0x86348100u,  // [  3]  word address 0x0003
     0x86588002u,  // [  4]  word address 0x0004
-    0xD2510000u,  // [  5]  word address 0x0005
+    0xD2518000u,  // [  5]  word address 0x0005
     0x963A9014u,  // [  6]  word address 0x0006
     0x86348040u,  // [  7]  word address 0x0007
     0x965BFFFEu,  // [  8]  word address 0x0008
     0x8657F7FEu,  // [  9]  word address 0x0009
-    0xD2510000u,  // [ 10]  word address 0x000A
+    0xD2518000u,  // [ 10]  word address 0x000A
     0x8678C000u,  // [ 11]  word address 0x000B
     0x86988000u,  // [ 12]  word address 0x000C
-    0xD2930000u,  // [ 13]  word address 0x000D
-    0xD2930008u,  // [ 14]  word address 0x000E
+    0xD2938000u,  // [ 13]  word address 0x000D
+    0xD2938004u,  // [ 14]  word address 0x000E
     0x9A008001u,  // [ 15]  word address 0x000F
     0x86148002u,  // [ 16]  word address 0x0010
     0x9A008000u,  // [ 17]  word address 0x0011
     0x86B88006u,  // [ 18]  word address 0x0012
-    0xC2D30000u,  // [ 19]  word address 0x0013
+    0xC2D38000u,  // [ 19]  word address 0x0013
     0x82F6D415u,  // [ 20]  word address 0x0014
     0x93FF97F8u,  // [ 21]  word address 0x0015
     0x8004B802u,  // [ 22]  word address 0x0016
@@ -36,9 +36,9 @@ static const uint32_t rom_test_irq[] = {
     0x8777BD5Au,  // [ 24]  word address 0x0018
     0x97988000u,  // [ 25]  word address 0x0019
     0x8797FE00u,  // [ 26]  word address 0x001A
-    0xD37C0008u,  // [ 27]  word address 0x001B
+    0xD37C8004u,  // [ 27]  word address 0x001B
     0x87B88002u,  // [ 28]  word address 0x001C
-    0xD3BC0000u,  // [ 29]  word address 0x001D
+    0xD3BC8000u,  // [ 29]  word address 0x001D
     0x00000000u,  // [ 30]  word address 0x001E
     0x00000000u,  // [ 31]  word address 0x001F
     0x00000000u,  // [ 32]  word address 0x0020
@@ -73,7 +73,7 @@ static const uint32_t rom_test_irq[] = {
     0x00000000u,  // [ 61]  word address 0x003D
     0x00000000u,  // [ 62]  word address 0x003E
     0x00000000u,  // [ 63]  word address 0x003F
-    0x88000100u,  // [ 64]  word address 0x0040
+    0x88008100u,  // [ 64]  word address 0x0040
     0x00000000u,  // [ 65]  word address 0x0041
     0x00000000u,  // [ 66]  word address 0x0042
     0x00000000u,  // [ 67]  word address 0x0043
@@ -1163,7 +1163,7 @@ static const uint32_t rom_test_irq[] = {
     0x00000000u,  // [1151]  word address 0x047F
     0x9BE28001u,  // [1152]  word address 0x0480
     0x87D8C000u,  // [1153]  word address 0x0481
-    0xD3FE0008u,  // [1154]  word address 0x0482
+    0xD3FE8004u,  // [1154]  word address 0x0482
     0x9BE58001u,  // [1155]  word address 0x0483
     0x87E08008u,  // [1156]  word address 0x0484
     0x9BE58000u,  // [1157]  word address 0x0485
@@ -1378,13 +1378,13 @@ static const uint32_t rom_test_irq[] = {
     0x00000000u,  // [1366]  word address 0x0556
     0x00000000u,  // [1367]  word address 0x0557
     0x87D8C000u,  // [1368]  word address 0x0558
-    0xC3FE0000u,  // [1369]  word address 0x0559
+    0xC3FE8000u,  // [1369]  word address 0x0559
     0x87E08002u,  // [1370]  word address 0x055A
-    0xD3FE0000u,  // [1371]  word address 0x055B
+    0xD3FE8000u,  // [1371]  word address 0x055B
     0x97DA9002u,  // [1372]  word address 0x055C
     0x87D48108u,  // [1373]  word address 0x055D
     0x87F88002u,  // [1374]  word address 0x055E
-    0xD3FE0000u,  // [1375]  word address 0x055F
+    0xD3FE8000u,  // [1375]  word address 0x055F
     0x98008084u,  // [1376]  word address 0x0560
 };
 
