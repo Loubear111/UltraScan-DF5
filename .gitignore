@@ -21,3 +21,9 @@ tools/sdis/sdis
 
 # Generated demo disassembly listings
 build/disasm/
+
+AGENTS.md
+
+docs/
+
+.github/
