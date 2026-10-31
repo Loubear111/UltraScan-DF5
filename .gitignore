@@ -12,3 +12,12 @@ tests/artifacts/
 
 # Third-party dependencies
 third_party/
+
+# Commercial ROMs and BIOS images (never committed)
+ROMs/
+
+# Built disassembler
+tools/sdis/sdis
+
+# Generated demo disassembly listings
+build/disasm/

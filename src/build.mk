@@ -57,7 +57,7 @@ ppu.o: ppu.cpp ppu.h
 
 # Clean build files
 clean:
-	rm -f $(OBJS) $(TARGET) $(TEST_OBJS) $(TEST_TARGET)
+	rm -f $(OBJS) $(TARGET) $(TEST_OBJS) $(TEST_TARGET) $(SDIS_OBJS) $(SDIS_TARGET)
 
 # ----------------------------------------------------------------
 # Test target  —  requires: sudo apt-get install libgtest-dev
@@ -112,3 +112,30 @@ roms: $(ROM_HDRS)
 
 ../tests/roms/generated/%.h: ../tests/roms/generated/%.bin
 	$(BIN_TO_CPP) $< $@
+
+# ----------------------------------------------------------------
+# S+core7 disassembler (MAME scoredsm.cpp, BSD-3-Clause; see THIRD_PARTY_NOTICES.md)
+#
+# Usage: make -f build.mk sdis
+#        ../tools/sdis/sdis <file> <base> [start] [end]
+# score_disasm.o (score7Disasm) is also linked by tests as an independent decoder.
+# ----------------------------------------------------------------
+SDIS_DIR    = ../tools/sdis
+SDIS_OBJS   = $(SDIS_DIR)/scoredsm.o $(SDIS_DIR)/score_disasm.o $(SDIS_DIR)/main.o
+SDIS_TARGET = $(SDIS_DIR)/sdis
+
+.PHONY: sdis
+sdis: $(SDIS_TARGET)
+
+$(SDIS_TARGET): $(SDIS_OBJS)
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+# MAME's source trips -Wextra warnings we do not want to patch; keep the copy unmodified.
+$(SDIS_DIR)/scoredsm.o: $(SDIS_DIR)/scoredsm.cpp $(SDIS_DIR)/scoredsm.h $(SDIS_DIR)/scorem.h $(SDIS_DIR)/emu.h
+	$(CXX) $(CXXFLAGS) -Wno-unused-parameter -c $< -o $@
+
+$(SDIS_DIR)/score_disasm.o: $(SDIS_DIR)/score_disasm.cpp $(SDIS_DIR)/score_disasm.h $(SDIS_DIR)/scoredsm.h $(SDIS_DIR)/emu.h
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(SDIS_DIR)/main.o: $(SDIS_DIR)/main.cpp $(SDIS_DIR)/score_disasm.h
+	$(CXX) $(CXXFLAGS) -c $< -o $@
