@@ -2012,39 +2012,72 @@ uint8_t spg290::decode16()
     uint16_t w   = (uint16_t)(instr & 0xFFFF);
     uint8_t  op  = (w >> 12) & 0xF;
 
+    // The "!" ALU forms are CU = 1: they update the condition flags the way the
+    // 32-bit .c forms do (the PDF lists the flags as undefined/clobbered).
+    auto setNZ = [this](uint32_t r) { SetFlag(N, (r >> 31) & 1); SetFlag(Z, r == 0); };
+    auto add16 = [this, &setNZ](uint8_t d, uint32_t x, uint32_t y, uint32_t cin) {
+        uint64_t full = (uint64_t)x + y + cin;
+        uint32_t r = (uint32_t)full;
+        setNZ(r);
+        SetFlag(C, (full >> 32) & 1);
+        SetFlag(V, ((~(x ^ y) & (x ^ r)) >> 31) & 1);
+        writeReg(d, r);
+    };
+    // r = x - y; write=false is cmp! (flags only).
+    auto sub16 = [this, &setNZ](uint8_t d, uint32_t x, uint32_t y, bool write) {
+        uint32_t r = x - y;
+        setNZ(r);
+        SetFlag(C, x >= y);
+        SetFlag(V, (((x ^ y) & (x ^ r)) >> 31) & 1);
+        if (write) writeReg(d, r);
+    };
+    auto logic16 = [this, &setNZ](uint8_t d, uint32_t r, bool write) {
+        setNZ(r);
+        if (write) writeReg(d, r);
+    };
+    // kind: 0 sll, 1 srl, 2 sra. Amount = low 5 bits of the second operand.
+    auto shift16 = [this, &setNZ](uint8_t d, uint32_t x, uint32_t amt, int kind) {
+        uint8_t sa = amt & 0x1F;
+        uint32_t r = x;
+        bool c = false;
+        if (sa) {
+            if (kind == 0)      { r = x << sa;                 c = (x >> (32 - sa)) & 1; }
+            else if (kind == 1) { r = x >> sa;                 c = (x >> (sa - 1)) & 1; }
+            else                { r = (uint32_t)((int32_t)x >> sa); c = (x >> (sa - 1)) & 1; }
+        }
+        setNZ(r);
+        SetFlag(C, c);
+        writeReg(d, r);
+    };
+
     switch (op)
     {
-    case 0x0: // RR-ALU : func4[11:8] rD[7:4] rA[3:0]
+    case 0x0: // OP 0: rD[11:8] rA[7:4] func4[3:0]  (PDF 2.2)
     {
-        uint8_t func = (w >> 8) & 0xF;
-        uint8_t d    = (w >> 4) & 0xF;
-        uint8_t a    = w & 0xF;
-        uint32_t vd = regs[d];
-        uint32_t va = regs[a];
+        uint8_t d    = (w >> 8) & 0xF;
+        uint8_t a    = (w >> 4) & 0xF;
+        uint8_t func = w & 0xF;
+        uint32_t vd  = regs[d];
+        uint32_t va  = regs[a];
         switch (func)
         {
-        case 0:  writeReg(d, vd + va);                 break; // add!
-        case 1:  writeReg(d, vd + va + GetFlag(C));    break; // addc!
-        case 2:  writeReg(d, vd - va);                 break; // sub!
-        case 3:  writeReg(d, vd & va);                 break; // and!
-        case 4:  writeReg(d, vd | va);                 break; // or!
-        case 5:  writeReg(d, vd ^ va);                 break; // xor!
-        case 6:  writeReg(d, va);                      break; // mv!
-        case 7:  writeReg(d, 0u - va);                 break; // neg!
-        case 8:  writeReg(d, ~va);                     break; // not!
-        case 9: // cmp! : updates N/Z/C/V
-        {
-            uint32_t r = vd - va;
-            SetFlag(N, (r >> 31) & 1);
-            SetFlag(Z, r == 0);
-            SetFlag(C, vd >= va);
-            SetFlag(V, (((vd ^ va) & (vd ^ r)) >> 31) & 1);
+        case 0x0: break;                                       // nop!
+        case 0x1: writeReg(d, regs[a + 16]); break;            // mlfh! rD = r(16+rA)
+        case 0x2: writeReg((uint8_t)(d + 16), va); break;      // mhfl! r(16+rD) = rA
+        case 0x3: writeReg(d, va); break;                      // mv!
+        case 0x4:                                              // br{cond}! (EC = rD field)
+            if (evalCondition(d)) pc = va;
             break;
-        }
-        case 10: { uint8_t s = va & 0x1F; writeReg(d, s ? (vd << s) : vd); break; }                 // sll!
-        case 11: { uint8_t s = va & 0x1F; writeReg(d, s ? (vd >> s) : vd); break; }                 // srl!
-        case 12: { uint8_t s = va & 0x1F; writeReg(d, s ? (uint32_t)((int32_t)vd >> s) : vd); break; } // sra!
-        default: break;
+        case 0x5: SetFlag(T, evalCondition(d)); break;         // t{cond}! (EC = rD field)
+        case 0x8: shift16(d, vd, va, 0); break;                // sll!
+        case 0x9: { add16(d, vd, va, GetFlag(C)); break; }     // addc!
+        case 0xA: shift16(d, vd, va, 1); break;                // srl!
+        case 0xB: shift16(d, vd, va, 2); break;                // sra!
+        case 0xC:                                              // brl{cond}!: r3 always written
+            writeReg(3, pc);
+            if (evalCondition(d)) pc = va;
+            break;
+        default: raiseException(EXC_RI); break;
         }
         break;
     }
@@ -2054,19 +2087,38 @@ uint8_t spg290::decode16()
         writeReg(d, (uint32_t)(w & 0xFF));
         break;
     }
-    case 0x2: // R-Imm : func2[11:10] rD[9:6] Imm[5:0]
+    case 0x2: // OP 2: rD[11:8] rA[7:4] func4[3:0]  (PDF 2.2)
     {
-        uint8_t func = (w >> 10) & 0x3;
-        uint8_t d    = (w >> 6) & 0xF;
-        uint8_t imm5 = w & 0x1F;
-        uint8_t imm4 = w & 0xF;
+        uint8_t d    = (w >> 8) & 0xF;
+        uint8_t a    = (w >> 4) & 0xF;
+        uint8_t func = w & 0xF;
         uint32_t vd  = regs[d];
+        uint32_t va  = regs[a];
         switch (func)
         {
-        case 0: writeReg(d, imm5 ? (vd << imm5) : vd);                 break; // slli!
-        case 1: writeReg(d, imm5 ? (vd >> imm5) : vd);                 break; // srli!
-        case 2: writeReg(d, vd + (1u << imm4));                        break; // addei!
-        case 3: writeReg(d, vd - (1u << imm4));                        break; // subei!
+        case 0x0: add16(d, vd, va, 0); break;                  // add!
+        case 0x1: sub16(d, vd, va, true); break;               // sub!
+        case 0x2: sub16(d, 0, va, true); break;                // neg!
+        case 0x3: sub16(d, vd, va, false); break;              // cmp!
+        case 0x4: logic16(d, vd & va, true); break;            // and!
+        case 0x5: logic16(d, vd | va, true); break;            // or!
+        case 0x6: logic16(d, ~va, true); break;                // not!
+        case 0x7: logic16(d, vd ^ va, true); break;            // xor!
+        case 0x8: writeReg(d, readWord(va)); break;            // lw!
+        case 0x9: writeReg(d, (uint32_t)(int32_t)(int16_t)readHalf(va)); break; // lh!
+        case 0xB: writeReg(d, readByte(va)); break;            // lbu!
+        case 0xC: writeWord(va, vd); break;                    // sw!
+        case 0xD: writeHalf(va, (uint16_t)vd); break;          // sh!
+        case 0xF: writeByte(va, (uint8_t)vd); break;           // sb!
+        case 0xA: case 0xE:                                    // pop! / push!: rDgh[11:8]+H[7], rAg0[6:4]
+        {
+            uint8_t dg   = (uint8_t)(d | ((w >> 7) & 1) << 4);
+            uint8_t base = (w >> 4) & 0x7;
+            uint32_t b   = regs[base];
+            if (func == 0xA) { writeReg(dg, readWord(b)); writeReg(base, b + 4); }
+            else             { writeWord(b - 4, regs[dg]); writeReg(base, b - 4); }
+            break;
+        }
         default: break;
         }
         break;

@@ -35,6 +35,13 @@ protected:
         bus.cpu.clock();
     }
 
+    // Place a 16-bit instruction at the current PC and execute one clock cycle.
+    void execute16(uint16_t instr_half)
+    {
+        bus.write16(bus.cpu.pc, instr_half);
+        bus.cpu.clock();
+    }
+
     // Read a CPU status flag
     uint8_t getFlag(spg290::FLAGS290 f)
     {
