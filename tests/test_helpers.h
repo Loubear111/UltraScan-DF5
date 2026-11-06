@@ -127,331 +127,448 @@ protected:
 
 
 // ============================================================
-// Instruction word encoders
+// Instruction word encoders (spec-derived)
 //
-// Each function constructs the 32-bit instruction word from its
-// constituent fields. Bit 31 is set on all encoders to match the
-// real HyperScan instruction encoding (32-bit instruction
-// indicator), though the current decoder treats it as don't-care.
+// Layouts come from s_core7.pdf (section 1.1 and the per-instruction Form
+// diagrams) and docs/phase4a-conformance-fix-plan.md section 2. They are NOT
+// derived from the emulator's decoder, so a decoder bug can no longer be
+// hidden by a matching encoder bug. tests/test_encoding_conformance.cpp
+// cross-checks every encoder against an independent decoder (MAME's S+core7
+// disassembler, tools/sdis).
 //
-// All three verified encoders are cross-checked against the
-// known-good instruction words in src/main.cpp:
-//   encodeANDX (12,10,11,false) == 0x818A2C20
-//   encodeANDIX(12,0xFFFF,false) == 0x85937FFE
-//   encodeANDRIX(12,10,0x234E,false) == 0xB18A469C
+// 32-bit instructions: the architectural word has two P-bits (bit 31 and
+// bit 15, both 1). Fields are laid out in the 30-bit P-bit-free word `op`
+// (op bits 29:25 = opcode); enc32_pack() inserts the P-bits:
+//     raw = 0x80008000 | ((op & 0x3FFF8000) << 1) | (op & 0x7FFF)
+//
+// 16-bit instructions: the encoders return the raw 16-bit instruction
+// (P-bit 15 = 0) as a uint16_t, e.g. nop! == 0x0000, b! (always) disp 0 ==
+// 0x4F00. Where it lands in memory depends on bus byte order and pc & 2;
+// that is the fetch rewrite's concern (plan story 5), not the encoder's.
 // ============================================================
 
-// --- ANDX : d = a & b  (R-type, opcode=0, func6 bit-5 set) ---
-// bits 30:26 = 0 (opcode)
-// bits 25:21 = d_reg
-// bits 20:16 = a_reg
-// bits 14:10 = b_reg
-// bits  6:1  = 0x20 (func6 sentinel)
-// bit    0   = CU
-static inline uint32_t encodeANDX(uint8_t d, uint8_t a, uint8_t b, bool cu)
+// --- 32-bit builders, one per form ---
+
+// Insert the two P-bits into a 30-bit P-bit-free instruction word.
+static inline uint32_t enc32_pack(uint32_t op)
 {
-    return 0x80000000u
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((uint32_t)(a & 0x1F) << 16)
-         | ((uint32_t)(b & 0x1F) << 10)
-         | 0x20u          // func6: satisfies (instr & 0x7E) >> 1 == 0x10
-         | (cu ? 1u : 0u);
+    return 0x80008000u | ((op & 0x3FFF8000u) << 1) | (op & 0x7FFFu);
 }
 
-// --- ANDIX : d = d & imm16  (I-type, opcode=1, func3=4) ---
-// bits 30:26 = 1 (opcode)
-// bits 25:21 = d_reg
-// bits 20:18 = func3 = 0b100
-// bits 17:16 = imm[15:14]
-// bit    15  = 0 (unused)
-// bits 14:1  = imm[13:0]
-// bit    0   = CU
-static inline uint32_t encodeANDIX(uint8_t d, uint16_t imm, bool cu)
+// Special-form (opcode 0): rD[24:20] rA[19:15] rB[14:10] func6[6:1] CU[0]
+// (field positions are in `op`; in the raw word they are 25:21, 20:16, 14:10).
+static inline uint32_t enc32_special(uint8_t rd, uint8_t ra, uint8_t rb, uint32_t func6, bool cu)
 {
-    return 0x80000000u
-         | (1u << 26)
-         | ((uint32_t)(d & 0x1F) << 21)
-         | (0x4u << 18)
-         | ((uint32_t)((imm >> 14) & 0x3) << 16)
-         | (1u << 15)  // 32-bit instruction marker (matches GAS output)
-         | ((uint32_t)(imm & 0x3FFF) << 1)
-         | (cu ? 1u : 0u);
+    return enc32_pack(((uint32_t)(rd & 0x1F) << 20)
+                    | ((uint32_t)(ra & 0x1F) << 15)
+                    | ((uint32_t)(rb & 0x1F) << 10)
+                    | ((func6 & 0x3F) << 1)
+                    | (cu ? 1u : 0u));
 }
 
-// --- ANDRIX : d = a & imm14  (RI-type, opcode=0b01100=12) ---
-// bits 30:26 = 12 (opcode)
-// bits 25:21 = d_reg
-// bits 20:16 = a_reg
-// bits 14:1  = imm14
-// bit    0   = CU
-static inline uint32_t encodeANDRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu)
+// I-form (opcodes 1 and 5): rD, func3[19:17], Imm16[16:1], CU[0].
+static inline uint32_t enc32_I(uint32_t opc, uint8_t rd, uint32_t func3, uint16_t imm16, bool cu)
 {
-    return 0x80000000u
-         | (12u << 26)
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((uint32_t)(a & 0x1F) << 16)
-         | ((uint32_t)(imm14 & 0x3FFF) << 1)
-         | (cu ? 1u : 0u);
+    return enc32_pack(((opc & 0x1F) << 25)
+                    | ((uint32_t)(rd & 0x1F) << 20)
+                    | ((func3 & 0x7) << 17)
+                    | ((uint32_t)imm16 << 1)
+                    | (cu ? 1u : 0u));
 }
 
-// ============================================================
-// Generic encoders for this emulator's instruction formats.
-// (See the encoding convention documented in src/spg290.h.)
-//
-//   R-type   : opcode 0,        rD[25:21] rA[20:16] rB/SA[14:10]
-//              func6[6:1] CU[0]
-//   I-type-1 : opcode 1,        rD[25:21] func3[20:18] imm16[16:1] CU[0]
-//   I-type-2 : opcode 2,        rD[25:21] func3[20:18] imm16[16:1] CU[0]
-//   RIX-type : opcode 0x0C-0x0F rD[25:21] rA[20:16] imm14[14:1] CU[0]
-// ============================================================
+// RI-form (opcodes 0x08, 0x0C, 0x0D): rD, rA, Imm14[14:1], CU[0].
+static inline uint32_t enc32_RI(uint32_t opc, uint8_t rd, uint8_t ra, uint16_t imm14, bool cu)
+{
+    return enc32_pack(((opc & 0x1F) << 25)
+                    | ((uint32_t)(rd & 0x1F) << 20)
+                    | ((uint32_t)(ra & 0x1F) << 15)
+                    | ((uint32_t)(imm14 & 0x3FFF) << 1)
+                    | (cu ? 1u : 0u));
+}
 
-// EF6 placeholder values updated to valid 6-bit range (0x26-0x37):
-// MVCOND=0x26, REM=0x27, REMU=0x28, ROLIC=0x29, RORIC=0x2A
-// ADDS=0x2B, SUBS=0x30, SLLS=0x31, MSBU=0x32, BITREV=0x33
-// CLZ/ABS/MIN/MAX kept at original values 0x34-0x37 (no conflict)
+// RIX-form (opcode 3 pre-index, opcode 7 post-index): rD, rA, Imm12[14:3], func3[2:0].
+static inline uint32_t enc32_RIX(uint32_t opc, uint8_t rd, uint8_t ra, int32_t imm12, uint32_t func3)
+{
+    return enc32_pack(((opc & 0x1F) << 25)
+                    | ((uint32_t)(rd & 0x1F) << 20)
+                    | ((uint32_t)(ra & 0x1F) << 15)
+                    | (((uint32_t)imm12 & 0xFFFu) << 3)
+                    | (func3 & 0x7));
+}
+
+// LS-form (opcodes 0x10-0x18): rD, rA, Imm15[14:0].
+static inline uint32_t enc32_LS(uint32_t opc, uint8_t rd, uint8_t ra, int32_t imm15)
+{
+    return enc32_pack(((opc & 0x1F) << 25)
+                    | ((uint32_t)(rd & 0x1F) << 20)
+                    | ((uint32_t)(ra & 0x1F) << 15)
+                    | ((uint32_t)imm15 & 0x7FFFu));
+}
+
+// J-form (opcode 2): Disp24[24:1], LK[0].
+static inline uint32_t enc32_J(uint32_t disp24, bool lk)
+{
+    return enc32_pack((0x02u << 25) | ((disp24 & 0xFFFFFFu) << 1) | (lk ? 1u : 0u));
+}
+
+// BC-form (opcode 4): Disp19 split as Disp[18:9] -> op 24:15, Disp[8:0] -> op 9:1;
+// EC[14:10], LK[0].
+static inline uint32_t enc32_BC(uint8_t ec, int32_t disp19, bool lk)
+{
+    const uint32_t d = (uint32_t)disp19 & 0x7FFFFu;
+    return enc32_pack((0x04u << 25)
+                    | (((d >> 9) & 0x3FFu) << 15)
+                    | ((uint32_t)(ec & 0x1F) << 10)
+                    | ((d & 0x1FFu) << 1)
+                    | (lk ? 1u : 0u));
+}
+
+// CR-form (opcode 6): rD, CR[19:15], CR_OP[7:0] (mtcr 0x00, mfcr 0x01, rte 0x84,
+// drte 0xA4, sleep 0xC4 -- the last three from the PDF Form diagrams).
+static inline uint32_t enc32_CR(uint8_t rd, uint8_t crn, uint32_t cr_op)
+{
+    return enc32_pack((0x06u << 25)
+                    | ((uint32_t)(rd & 0x1F) << 20)
+                    | ((uint32_t)(crn & 0x1F) << 15)
+                    | (cr_op & 0xFFu));
+}
+
+// func6 values (plan section 2.4).
 enum : uint32_t {
-    EF6_NOP=0x00,
-    // Arithmetic (confirmed)
-    EF6_ADDX=0x08, EF6_ADDCX=0x09, EF6_SUBX=0x0A, EF6_SUBCX=0x0B, EF6_NEGX=0x0F,
-    // TODO unknowns (placeholder values in valid 6-bit range; real values confirmed
-    // via score-elf-as but blocked by collisions with the un-audited HWMAC/CE family
-    // -- see /memories/session/phase2-isa-audit.md)
-    EF6_CMP=0x06, EF6_CMPZ=0x07, EF6_MVCOND=0x26, EF6_REM=0x27, EF6_REMU=0x2A,
-    // Bitwise (confirmed)
+    EF6_NOP=0x00, EF6_SYSCALL=0x01, EF6_TRAPCOND=0x02, EF6_SDBBP=0x03, EF6_BRCOND=0x04, EF6_PFLUSH=0x05,
+    EF6_ADDX=0x08, EF6_ADDCX=0x09, EF6_SUBX=0x0A, EF6_SUBCX=0x0B, EF6_CMP=0x0C, EF6_CMPZ=0x0D, EF6_NEGX=0x0F,
     EF6_ANDX=0x10, EF6_ORX=0x11, EF6_NOTX=0x12, EF6_XORX=0x13,
-    // TODO unknown (see note above)
-    EF6_BITTSTC=0x14,
-    // Shifts/rotates (confirmed)
-    EF6_SLLX=0x18, EF6_SRLX=0x1A, EF6_SRAX=0x1B, EF6_ROLX=0x1E, EF6_RORX=0x1C,
-    EF6_SLLIX=0x38, EF6_SRLIX=0x3A, EF6_SRAIX=0x3B, EF6_ROLIX=0x3E, EF6_RORIX=0x3C,
-    // rotate-through-carry: ROLIC/RORIC confirmed via score-elf-as; ROLC/RORC's real
-    // values collide with the un-audited HWMAC/CE family, kept as placeholders.
-    EF6_ROLC=0x17, EF6_ROLIC=0x3F, EF6_RORC=0x19, EF6_RORIC=0x3D,
-    // Extend (confirmed)
+    EF6_BITCLR=0x14, EF6_BITSET=0x15, EF6_BITTST=0x16, EF6_BITTGL=0x17,
+    EF6_SLLX=0x18, EF6_SRLX=0x1A, EF6_SRAX=0x1B, EF6_RORX=0x1C, EF6_RORC=0x1D, EF6_ROLX=0x1E, EF6_ROLC=0x1F,
+    EF6_MUL=0x20, EF6_MULU=0x21, EF6_DIV=0x22, EF6_DIVU=0x23, EF6_MFCE=0x24, EF6_MTCE=0x25,
+    EF6_MFSR=0x28, EF6_MTSR=0x29, EF6_TCOND=0x2A, EF6_MVCOND=0x2B,
     EF6_EXTSBX=0x2C, EF6_EXTSHX=0x2D, EF6_EXTZBX=0x2E, EF6_EXTZHX=0x2F,
-    // Multiply/divide (confirmed)
-    EF6_MUL=0x20, EF6_MULU=0x21, EF6_DIV=0x22, EF6_DIVU=0x23,
-    // CE register moves (confirmed; rB=1 for CEL, rB=2 for CEH, rB=3 for both)
-    EF6_MFCEL=0x24, EF6_MFCEH=0x24, EF6_MTCEL=0x25, EF6_MTCEH=0x25,
-    // Confirmed real R-type instructions (previously only reachable via OP_SYS)
-    EF6_SYSCALL=0x01, EF6_TRAPCOND=0x02, EF6_MFSR=0x28, EF6_MTSR=0x29,
-    // HWMAC sub-fields (opcode 0x1C, not R-type)
-    EF6_MAD=0x0C, EF6_MADU=0x0D, EF6_MSB=0x0E, EF6_MSBU=0x32,
-    // Saturating/misc → HWMAC, placeholders in valid 6-bit range
-    EF6_ADDS=0x2B, EF6_SUBS=0x30, EF6_ABSS=0x1D, EF6_SLLS=0x31, EF6_MSBF=0x1F,
-    EF6_CLZ=0x34, EF6_ABS=0x35, EF6_MIN=0x36, EF6_MAX=0x37, EF6_BITREV=0x33,
-    EF6_MULF=0x15, EF6_MADF=0x16
+    EF6_LCB=0x30, EF6_LCW=0x31, EF6_LCE=0x33, EF6_SCB=0x34, EF6_SCW=0x35, EF6_SCE=0x37,
+    EF6_SLLIX=0x38, EF6_SRLIX=0x3A, EF6_SRAIX=0x3B, EF6_RORIX=0x3C, EF6_RORIC=0x3D, EF6_ROLIX=0x3E, EF6_ROLIC=0x3F
 };
 
-// Raw format builders.
+// Name-compatible shorthands used by the instruction encoders below.
 static inline uint32_t encR(uint32_t func6, uint8_t d, uint8_t a, uint8_t b, bool cu)
 {
-    return 0x80000000u
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((uint32_t)(a & 0x1F) << 16)
-         | ((uint32_t)(b & 0x1F) << 10)
-         | ((func6 & 0x3F) << 1)
-         | (cu ? 1u : 0u);
+    return enc32_special(d, a, b, func6, cu);
 }
-// I-type-1 (opcode 1): GAS non-contiguous immediate format.
-//   imm16[15:14] → bits 17:16, bit 15 = 1 (32-bit marker), imm16[13:0] → bits 14:1.
-// This matches real score-elf-as output exactly.
-static inline uint32_t encI1(uint32_t func3, uint8_t d, uint16_t imm16, bool cu)
-{
-    return 0x80000000u | (1u << 26)
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((func3 & 0x7) << 18)
-         | ((uint32_t)((imm16 >> 14) & 0x3) << 16)  // imm[15:14] → bits 17:16
-         | (1u << 15)                                  // 32-bit instruction marker
-         | ((uint32_t)(imm16 & 0x3FFF) << 1)          // imm[13:0] → bits 14:1
-         | (cu ? 1u : 0u);
-}
-// I-type-S (opcode 5): shifted-immediate class (addis/andis/oris).
-// Same non-contiguous immediate format as I-type-1.
-static inline uint32_t encIS(uint32_t func3, uint8_t d, uint16_t imm16, bool cu)
-{
-    return 0x80000000u | (5u << 26)
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((func3 & 0x7) << 18)
-         | ((uint32_t)((imm16 >> 14) & 0x3) << 16)
-         | (1u << 15)
-         | ((uint32_t)(imm16 & 0x3FFF) << 1)
-         | (cu ? 1u : 0u);
-}
-// I-type-2 (placeholder opcode 0x03): SUBIX/LDIS — real opcodes TODO.
-static inline uint32_t encI2(uint32_t func3, uint8_t d, uint16_t imm16, bool cu)
-{
-    return 0x80000000u | (0x03u << 26)
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((func3 & 0x7) << 18)
-         | ((uint32_t)((imm16 >> 14) & 0x3) << 16)
-         | (1u << 15)
-         | ((uint32_t)(imm16 & 0x3FFF) << 1)
-         | (cu ? 1u : 0u);
-}
-static inline uint32_t encRIX(uint32_t opcode, uint8_t d, uint8_t a, uint16_t imm14, bool cu)
-{
-    return 0x80000000u | ((opcode & 0x1F) << 26)
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((uint32_t)(a & 0x1F) << 16)
-         | ((uint32_t)(imm14 & 0x3FFF) << 1)
-         | (cu ? 1u : 0u);
-}
+static inline uint32_t encI1(uint32_t func3, uint8_t d, uint16_t imm16, bool cu) { return enc32_I(0x01, d, func3, imm16, cu); }
+static inline uint32_t encIS(uint32_t func3, uint8_t d, uint16_t imm16, bool cu) { return enc32_I(0x05, d, func3, imm16, cu); }
+static inline uint32_t encLS(uint32_t opcode, uint8_t d, uint8_t a, uint16_t imm15) { return enc32_LS(opcode, d, a, imm15); }
 
-// --- Previously-scaffolded instructions (now wired up) ---
-static inline uint32_t encodeANDISX(uint8_t d, uint16_t imm16, bool cu) { return encIS(4, d, imm16, cu); }  // andis opcode=5 func3=4
+// --- Special-form: arithmetic / logic ---
+static inline uint32_t encodeANDX(uint8_t d, uint8_t a, uint8_t b, bool cu)  { return encR(EF6_ANDX, d, a, b, cu); }
+static inline uint32_t encodeADDX(uint8_t d, uint8_t a, uint8_t b, bool cu)  { return encR(EF6_ADDX, d, a, b, cu); }
 static inline uint32_t encodeADDCX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_ADDCX, d, a, b, cu); }
-static inline uint32_t encodeADDIX(uint8_t d, uint16_t imm16, bool cu) { return encI1(0, d, imm16, cu); }  // addi opcode=1 func3=0
-static inline uint32_t encodeADDISX(uint8_t d, uint16_t imm16, bool cu) { return encIS(0, d, imm16, cu); }  // addis opcode=5 func3=0
-static inline uint32_t encodeADDRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu) { return encRIX(0x08, d, a, imm14, cu); }  // addri opcode=0x08
-static inline uint32_t encodeORX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_ORX, d, a, b, cu); }
-static inline uint32_t encodeBITTSTC(uint8_t a, uint8_t bn, bool cu) { return encR(EF6_BITTSTC, 0, a, bn, cu); }
-
-// --- R-type arithmetic / logic ---
-static inline uint32_t encodeADDX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_ADDX, d, a, b, cu); }
-static inline uint32_t encodeSUBX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_SUBX, d, a, b, cu); }
+static inline uint32_t encodeSUBX(uint8_t d, uint8_t a, uint8_t b, bool cu)  { return encR(EF6_SUBX, d, a, b, cu); }
 static inline uint32_t encodeSUBCX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_SUBCX, d, a, b, cu); }
-static inline uint32_t encodeNEGX(uint8_t d, uint8_t b, bool cu) { return encR(EF6_NEGX, d, 0, b, cu); }
-static inline uint32_t encodeNOTX(uint8_t d, uint8_t a, bool cu) { return encR(EF6_NOTX, d, a, 0, cu); }
-static inline uint32_t encodeXORX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_XORX, d, a, b, cu); }
-static inline uint32_t encodeNOP() { return encR(EF6_NOP, 0, 0, 0, false); }
-// cmp / cmpz carry their 2-bit TCS in the low bits of the rD field.
-static inline uint32_t encodeCMP(uint8_t a, uint8_t b, uint8_t tcs) { return encR(EF6_CMP, tcs & 0x3, a, b, true); }
-static inline uint32_t encodeCMPZ(uint8_t a, uint8_t tcs) { return encR(EF6_CMPZ, tcs & 0x3, a, 0, true); }
-// mv{cond} carries its 4-bit EC in the low bits of the rB field.
-static inline uint32_t encodeMVCOND(uint8_t d, uint8_t a, uint8_t ec) { return encR(EF6_MVCOND, d, a, ec & 0xF, false); }
+static inline uint32_t encodeORX(uint8_t d, uint8_t a, uint8_t b, bool cu)   { return encR(EF6_ORX, d, a, b, cu); }
+static inline uint32_t encodeXORX(uint8_t d, uint8_t a, uint8_t b, bool cu)  { return encR(EF6_XORX, d, a, b, cu); }
+static inline uint32_t encodeNEGX(uint8_t d, uint8_t b, bool cu)             { return encR(EF6_NEGX, d, 0, b, cu); }
+static inline uint32_t encodeNOTX(uint8_t d, uint8_t a, bool cu)             { return encR(EF6_NOTX, d, a, 0, cu); }
+static inline uint32_t encodeNOP()                                           { return encR(EF6_NOP, 0, 0, 0, false); }
+// cmp / cmpz carry their 2-bit TCS in the low bits of the rD field; both are .c forms.
+static inline uint32_t encodeCMP(uint8_t a, uint8_t b, uint8_t tcs)         { return encR(EF6_CMP, tcs & 0x3, a, b, true); }
+static inline uint32_t encodeCMPZ(uint8_t a, uint8_t tcs)                   { return encR(EF6_CMPZ, tcs & 0x3, a, 0, true); }
+// mv{cond} / t{cond} carry their 4-bit EC in the rB field.
+static inline uint32_t encodeMVCOND(uint8_t d, uint8_t a, uint8_t ec)       { return encR(EF6_MVCOND, d, a, ec & 0xF, false); }
+static inline uint32_t encodeTCOND(uint8_t ec)                              { return encR(EF6_TCOND, 0, 0, ec & 0xF, false); }
 
-// --- Immediate forms ---
-static inline uint32_t encodeORIX(uint8_t d, uint16_t imm16, bool cu) { return encI1(5, d, imm16, cu); }  // ori opcode=1 func3=5
-static inline uint32_t encodeORISX(uint8_t d, uint16_t imm16, bool cu) { return encIS(5, d, imm16, cu); }  // oris opcode=5 func3=5
-static inline uint32_t encodeCMPI(uint8_t d, uint16_t imm16) { return encI1(2, d, imm16, true); }
-static inline uint32_t encodeLDI(uint8_t d, uint16_t imm16) { return encI1(6, d, imm16, false); }  // ldi opcode=1 func3=6
-// ldis: confirmed via score-elf-as to be OP_ITYPE_S func3=6 (opcode 5), not the
-// OP_ITYPE2 placeholder opcode.
-static inline uint32_t encodeLDIS(uint8_t d, uint16_t imm16) { return encIS(6, d, imm16, false); }
-static inline uint32_t encodeSUBIX(uint8_t d, uint16_t imm16, bool cu) { return encI2(1, d, imm16, cu); }
-static inline uint32_t encodeSUBISX(uint8_t d, uint16_t imm16, bool cu) { return encI2(2, d, imm16, cu); }
-static inline uint32_t encodeORRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu) { return encRIX(0x0D, d, a, imm14, cu); }  // orri opcode=0x0D
-static inline uint32_t encodeSUBRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu) { return encRIX(0x0F, d, a, imm14, cu); }
+// --- Special-form: bit operations (rA = register, rB = bit number) ---
+static inline uint32_t encodeBITCLR(uint8_t a, uint8_t bn, bool cu) { return encR(EF6_BITCLR, 0, a, bn, cu); }
+static inline uint32_t encodeBITSET(uint8_t a, uint8_t bn, bool cu) { return encR(EF6_BITSET, 0, a, bn, cu); }
+static inline uint32_t encodeBITTST(uint8_t a, uint8_t bn, bool cu) { return encR(EF6_BITTST, 0, a, bn, cu); }
+static inline uint32_t encodeBITTGL(uint8_t a, uint8_t bn, bool cu) { return encR(EF6_BITTGL, 0, a, bn, cu); }
+static inline uint32_t encodeBITTSTC(uint8_t a, uint8_t bn, bool cu) { return encodeBITTST(a, bn, cu); }  // historical name
 
-// --- Shifts / rotates (register and immediate) ---
+// --- Special-form: shifts / rotates (register and immediate) ---
 static inline uint32_t encodeSLLX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_SLLX, d, a, b, cu); }
 static inline uint32_t encodeSRLX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_SRLX, d, a, b, cu); }
 static inline uint32_t encodeSRAX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_SRAX, d, a, b, cu); }
 static inline uint32_t encodeROLX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_ROLX, d, a, b, cu); }
 static inline uint32_t encodeRORX(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_RORX, d, a, b, cu); }
+static inline uint32_t encodeROLC(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_ROLC, d, a, b, cu); }
+static inline uint32_t encodeRORC(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(EF6_RORC, d, a, b, cu); }
 static inline uint32_t encodeSLLIX(uint8_t d, uint8_t a, uint8_t sa, bool cu) { return encR(EF6_SLLIX, d, a, sa, cu); }
 static inline uint32_t encodeSRLIX(uint8_t d, uint8_t a, uint8_t sa, bool cu) { return encR(EF6_SRLIX, d, a, sa, cu); }
 static inline uint32_t encodeSRAIX(uint8_t d, uint8_t a, uint8_t sa, bool cu) { return encR(EF6_SRAIX, d, a, sa, cu); }
 static inline uint32_t encodeROLIX(uint8_t d, uint8_t a, uint8_t sa, bool cu) { return encR(EF6_ROLIX, d, a, sa, cu); }
 static inline uint32_t encodeRORIX(uint8_t d, uint8_t a, uint8_t sa, bool cu) { return encR(EF6_RORIX, d, a, sa, cu); }
+static inline uint32_t encodeROLIC(uint8_t d, uint8_t a, uint8_t sa, bool cu) { return encR(EF6_ROLIC, d, a, sa, cu); }
+static inline uint32_t encodeRORIC(uint8_t d, uint8_t a, uint8_t sa, bool cu) { return encR(EF6_RORIC, d, a, sa, cu); }
 
-// --- Bit / extend / misc ---
+// --- Special-form: extend ---
 static inline uint32_t encodeEXTSBX(uint8_t d, uint8_t a, bool cu) { return encR(EF6_EXTSBX, d, a, 0, cu); }
 static inline uint32_t encodeEXTSHX(uint8_t d, uint8_t a, bool cu) { return encR(EF6_EXTSHX, d, a, 0, cu); }
 static inline uint32_t encodeEXTZBX(uint8_t d, uint8_t a, bool cu) { return encR(EF6_EXTZBX, d, a, 0, cu); }
 static inline uint32_t encodeEXTZHX(uint8_t d, uint8_t a, bool cu) { return encR(EF6_EXTZHX, d, a, 0, cu); }
-static inline uint32_t encodeCLZ(uint8_t d, uint8_t a) { return encR(EF6_CLZ, d, a, 0, false); }
-static inline uint32_t encodeABS(uint8_t d, uint8_t a) { return encR(EF6_ABS, d, a, 0, false); }
-static inline uint32_t encodeMIN(uint8_t d, uint8_t a, uint8_t b) { return encR(EF6_MIN, d, a, b, false); }
-static inline uint32_t encodeMAX(uint8_t d, uint8_t a, uint8_t b) { return encR(EF6_MAX, d, a, b, false); }
-static inline uint32_t encodeBITREV(uint8_t d, uint8_t a, uint8_t b) { return encR(EF6_BITREV, d, a, b, false); }
 
-// --- Custom engine: multiply / divide / moves ---
-static inline uint32_t encodeMUL(uint8_t a, uint8_t b) { return encR(EF6_MUL, 0, a, b, false); }
+// --- Special-form: multiply / divide / CE moves ---
+static inline uint32_t encodeMUL(uint8_t a, uint8_t b)  { return encR(EF6_MUL, 0, a, b, false); }
 static inline uint32_t encodeMULU(uint8_t a, uint8_t b) { return encR(EF6_MULU, 0, a, b, false); }
-static inline uint32_t encodeDIV(uint8_t a, uint8_t b) { return encR(EF6_DIV, 0, a, b, false); }
+static inline uint32_t encodeDIV(uint8_t a, uint8_t b)  { return encR(EF6_DIV, 0, a, b, false); }
 static inline uint32_t encodeDIVU(uint8_t a, uint8_t b) { return encR(EF6_DIVU, 0, a, b, false); }
-static inline uint32_t encodeREM(uint8_t d, uint8_t a, uint8_t b) { return encR(EF6_REM, d, a, b, false); }
-static inline uint32_t encodeREMU(uint8_t d, uint8_t a, uint8_t b) { return encR(EF6_REMU, d, a, b, false); }
-// rB=1 distinguishes CEL; rB=2 distinguishes CEH (both share func6=0x24/0x25)
-static inline uint32_t encodeMFCEL(uint8_t d) { return encR(EF6_MFCEL, d, 0, 1, false); }  // rB=1
-static inline uint32_t encodeMFCEH(uint8_t d) { return encR(EF6_MFCEH, d, 0, 2, false); }  // rB=2
-static inline uint32_t encodeMTCEL(uint8_t a) { return encR(EF6_MTCEL, 0, a, 1, false); }  // rB=1
-static inline uint32_t encodeMTCEH(uint8_t a) { return encR(EF6_MTCEH, 0, a, 2, false); }  // rB=2
+// rB selects the CE half: 1 = CEL, 2 = CEH, 3 = both (CEH to rD, CEL to rA for mfce;
+// mtce reads rD for CEL/CEH-single, rD = CEH and rA = CEL for both). mtce takes its
+// register in rD (PDF: "mtcel rD").
+static inline uint32_t encodeMFCEL(uint8_t d) { return encR(EF6_MFCE, d, 0, 1, false); }
+static inline uint32_t encodeMFCEH(uint8_t d) { return encR(EF6_MFCE, d, 0, 2, false); }
+static inline uint32_t encodeMFCEHL(uint8_t hi, uint8_t lo) { return encR(EF6_MFCE, hi, lo, 3, false); }
+static inline uint32_t encodeMTCEL(uint8_t r) { return encR(EF6_MTCE, r, 0, 1, false); }
+static inline uint32_t encodeMTCEH(uint8_t r) { return encR(EF6_MTCE, r, 0, 2, false); }
+static inline uint32_t encodeMTCEHL(uint8_t hi, uint8_t lo) { return encR(EF6_MTCE, hi, lo, 3, false); }
 
-// --- Custom engine: multiply-accumulate (func6 0x0C-0x0F, 0x15, 0x16) ---
-static inline uint32_t encodeMAD(uint8_t a, uint8_t b)  { return encR(0x0C, 0, a, b, false); }
-static inline uint32_t encodeMADU(uint8_t a, uint8_t b) { return encR(0x0D, 0, a, b, false); }
-static inline uint32_t encodeMSB(uint8_t a, uint8_t b)  { return encR(0x0E, 0, a, b, false); }
-static inline uint32_t encodeMSBU(uint8_t a, uint8_t b) { return encR(EF6_MSBU, 0, a, b, false); }
-static inline uint32_t encodeMULF(uint8_t a, uint8_t b) { return encR(0x15, 0, a, b, false); }
-static inline uint32_t encodeMADF(uint8_t a, uint8_t b) { return encR(0x16, 0, a, b, false); }
+// --- Special-form: system ---
+// trap{cond}: EC in rB. syscall/sdbbp32/pflush take no operands here.
+static inline uint32_t encodeTRAPCOND(uint8_t ec) { return encR(EF6_TRAPCOND, 0, 0, ec, false); }
+static inline uint32_t encodeSYSCALL()            { return encR(EF6_SYSCALL, 0, 0, 0, false); }
+static inline uint32_t encodeSDBBP32()            { return encR(EF6_SDBBP, 0, 0, 0, false); }
+static inline uint32_t encodePFLUSH()             { return encR(EF6_PFLUSH, 0, 0, 0, false); }
+// mfsr/mtsr: func6 0x28/0x29 per the plan. Operand field assignment is UNVERIFIED: the
+// existing tests put the GPR in rD (mfsr) / rA (mtsr) and the sr number in rA / rD, but
+// MAME prints mfsr as "sr<rB>, r<rA>". Not cross-checked until plan story 7c.
+static inline uint32_t encodeMFSR(uint8_t d, uint8_t srn)  { return encR(EF6_MFSR, d, srn, 0, false); }
+static inline uint32_t encodeMTSR(uint8_t a, uint8_t srn)  { return encR(EF6_MTSR, srn, a, 0, false); }
+// br{cond}[l]: EC in rB, target register in rA, LK in the CU bit.
+static inline uint32_t encodeBR(uint8_t ec, uint8_t a)  { return encR(EF6_BRCOND, 0, a, ec & 0xF, false); }
+static inline uint32_t encodeBRL(uint8_t ec, uint8_t a) { return encR(EF6_BRCOND, 0, a, ec & 0xF, true); }
+// Load/store combine: rD = bits 25:21, rA (base) = bits 20:16; lcb/sce take only the base.
+static inline uint32_t encodeLCB(uint8_t a)            { return encR(EF6_LCB, 0, a, 0, false); }
+static inline uint32_t encodeLCW(uint8_t d, uint8_t a) { return encR(EF6_LCW, d, a, 0, false); }
+static inline uint32_t encodeLCE(uint8_t d, uint8_t a) { return encR(EF6_LCE, d, a, 0, false); }
+static inline uint32_t encodeSCB(uint8_t d, uint8_t a) { return encR(EF6_SCB, d, a, 0, false); }
+static inline uint32_t encodeSCW(uint8_t d, uint8_t a) { return encR(EF6_SCW, d, a, 0, false); }
+static inline uint32_t encodeSCE(uint8_t a)            { return encR(EF6_SCE, 0, a, 0, false); }
 
-// --- Loads / stores : opcode, rD, rA, signed Imm15[14:0]; bit 15 is the P-bit ---
-static inline uint32_t encLS(uint32_t opcode, uint8_t d, uint8_t a, uint16_t imm15)
-{
-    return 0x80000000u | ((opcode & 0x1F) << 26)
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((uint32_t)(a & 0x1F) << 16)
-         | (1u << 15)
-         | ((uint32_t)(imm15 & 0x7FFF));
-}
-static inline uint32_t encodeLW(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x10, d, a, imm); }  // OP_LW=0x10 confirmed
-static inline uint32_t encodeLH(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x11, d, a, imm); }  // OP_LH=0x11 (was 0x15)
-static inline uint32_t encodeLHU(uint8_t d, uint8_t a, uint16_t imm) { return encLS(0x12, d, a, imm); }  // OP_LHU=0x12 (was 0x14)
-static inline uint32_t encodeLB(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x13, d, a, imm); }  // OP_LB=0x13 confirmed
-static inline uint32_t encodeSW(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x14, d, a, imm); }  // OP_SW=0x14 (was 0x11)
-static inline uint32_t encodeSH(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x15, d, a, imm); }  // OP_SH=0x15 (was 0x17)
-static inline uint32_t encodeLBU(uint8_t d, uint8_t a, uint16_t imm) { return encLS(0x16, d, a, imm); }  // OP_LBU=0x16 (was 0x12)
-static inline uint32_t encodeSB(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x17, d, a, imm); }  // OP_SB=0x17 (was 0x16)
+// --- I-form (opcode 1 and 5) ---
+// Opcode 1: addi=0 cmpi=2 andi=4 ori=5 ldi=6.  Opcode 5: addis=0 cmpis=2 andis=4 oris=5 ldis=6.
+static inline uint32_t encodeADDIX(uint8_t d, uint16_t imm16, bool cu)  { return encI1(0, d, imm16, cu); }
+static inline uint32_t encodeANDIX(uint8_t d, uint16_t imm, bool cu)    { return encI1(4, d, imm, cu); }
+static inline uint32_t encodeORIX(uint8_t d, uint16_t imm16, bool cu)   { return encI1(5, d, imm16, cu); }
+static inline uint32_t encodeCMPI(uint8_t d, uint16_t imm16)            { return encI1(2, d, imm16, true); }
+static inline uint32_t encodeLDI(uint8_t d, uint16_t imm16)             { return encI1(6, d, imm16, false); }
+static inline uint32_t encodeADDISX(uint8_t d, uint16_t imm16, bool cu) { return encIS(0, d, imm16, cu); }
+static inline uint32_t encodeCMPIS(uint8_t d, uint16_t imm16)           { return encIS(2, d, imm16, true); }
+static inline uint32_t encodeANDISX(uint8_t d, uint16_t imm16, bool cu) { return encIS(4, d, imm16, cu); }
+static inline uint32_t encodeORISX(uint8_t d, uint16_t imm16, bool cu)  { return encIS(5, d, imm16, cu); }
+static inline uint32_t encodeLDIS(uint8_t d, uint16_t imm16)            { return encIS(6, d, imm16, false); }
+
+// --- RI-form: addri 0x08, andri 0x0C, orri 0x0D ---
+static inline uint32_t encodeADDRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu) { return enc32_RI(0x08, d, a, imm14, cu); }
+static inline uint32_t encodeANDRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu) { return enc32_RI(0x0C, d, a, imm14, cu); }
+static inline uint32_t encodeORRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu)  { return enc32_RI(0x0D, d, a, imm14, cu); }
+
+// --- LS-form (opcodes 0x10-0x17): rD, [rA, SImm15]; 0x18 = cache ---
+static inline uint32_t encodeLW(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x10, d, a, imm); }
+static inline uint32_t encodeLH(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x11, d, a, imm); }
+static inline uint32_t encodeLHU(uint8_t d, uint8_t a, uint16_t imm) { return encLS(0x12, d, a, imm); }
+static inline uint32_t encodeLB(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x13, d, a, imm); }
+static inline uint32_t encodeSW(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x14, d, a, imm); }
+static inline uint32_t encodeSH(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x15, d, a, imm); }
+static inline uint32_t encodeLBU(uint8_t d, uint8_t a, uint16_t imm) { return encLS(0x16, d, a, imm); }
+static inline uint32_t encodeSB(uint8_t d, uint8_t a, uint16_t imm)  { return encLS(0x17, d, a, imm); }
+// cache: the rD field carries Cache-OP; no operands here (cache_op 0, [r0, 0]).
+static inline uint32_t encodeCACHE() { return enc32_LS(0x18, 0, 0, 0); }
+
+// --- RIX-form pre-index (opcode 3: rA += SImm12, then access [rA]) and
+//     post-index (opcode 7: access [rA], then rA += SImm12). func3: lw 0 lh 1 lhu 2 lb 3 sw 4 sh 5 lbu 6 sb 7. ---
+static inline uint32_t encodeLW_pre(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x03, d, a, imm, 0); }
+static inline uint32_t encodeLH_pre(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x03, d, a, imm, 1); }
+static inline uint32_t encodeLHU_pre(uint8_t d, uint8_t a, int16_t imm) { return enc32_RIX(0x03, d, a, imm, 2); }
+static inline uint32_t encodeLB_pre(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x03, d, a, imm, 3); }
+static inline uint32_t encodeSW_pre(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x03, d, a, imm, 4); }
+static inline uint32_t encodeSH_pre(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x03, d, a, imm, 5); }
+static inline uint32_t encodeLBU_pre(uint8_t d, uint8_t a, int16_t imm) { return enc32_RIX(0x03, d, a, imm, 6); }
+static inline uint32_t encodeSB_pre(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x03, d, a, imm, 7); }
+static inline uint32_t encodeLW_post(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x07, d, a, imm, 0); }
+static inline uint32_t encodeLH_post(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x07, d, a, imm, 1); }
+static inline uint32_t encodeLHU_post(uint8_t d, uint8_t a, int16_t imm) { return enc32_RIX(0x07, d, a, imm, 2); }
+static inline uint32_t encodeLB_post(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x07, d, a, imm, 3); }
+static inline uint32_t encodeSW_post(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x07, d, a, imm, 4); }
+static inline uint32_t encodeSH_post(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x07, d, a, imm, 5); }
+static inline uint32_t encodeLBU_post(uint8_t d, uint8_t a, int16_t imm) { return enc32_RIX(0x07, d, a, imm, 6); }
+static inline uint32_t encodeSB_post(uint8_t d, uint8_t a, int16_t imm)  { return enc32_RIX(0x07, d, a, imm, 7); }
+// Older call-site names: `pre` selects opcode 3 (pre-index) or 7 (post-index).
+static inline uint32_t encodeLW_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return pre ? encodeLW_pre(d, a, imm)  : encodeLW_post(d, a, imm); }
+static inline uint32_t encodeSW_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return pre ? encodeSW_pre(d, a, imm)  : encodeSW_post(d, a, imm); }
+static inline uint32_t encodeLBU_idx(uint8_t d, uint8_t a, int16_t imm, bool pre) { return pre ? encodeLBU_pre(d, a, imm) : encodeLBU_post(d, a, imm); }
+static inline uint32_t encodeLB_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return pre ? encodeLB_pre(d, a, imm)  : encodeLB_post(d, a, imm); }
+static inline uint32_t encodeLHU_idx(uint8_t d, uint8_t a, int16_t imm, bool pre) { return pre ? encodeLHU_pre(d, a, imm) : encodeLHU_post(d, a, imm); }
+static inline uint32_t encodeLH_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return pre ? encodeLH_pre(d, a, imm)  : encodeLH_post(d, a, imm); }
+static inline uint32_t encodeSB_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return pre ? encodeSB_pre(d, a, imm)  : encodeSB_post(d, a, imm); }
+static inline uint32_t encodeSH_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return pre ? encodeSH_pre(d, a, imm)  : encodeSH_post(d, a, imm); }
 
 // --- Control flow ---
-// b{cond}/b{cond}l share one real opcode (0x04); CU bit selects the link
-// form. BC at bits13:10, split 19-bit displacement (Disp[18:9] at bits25:16,
-// Disp[8:0] at bits9:1, bit 15 is the P-bit).
-static inline uint32_t encodeBC(uint8_t bc, int32_t disp19, bool link)
-{
-    uint32_t d = (uint32_t)disp19 & 0x7FFFF;
-    uint32_t hi = (d >> 9) & 0x3FF;
-    uint32_t lo = d & 0x1FF;
-    return 0x80000000u | (0x04u << 26)
-         | (hi << 16)
-         | (1u << 15)
-         | ((uint32_t)(bc & 0xF) << 10)
-         | (lo << 1)
-         | (link ? 1u : 0u);
-}
+// b{cond}[l]: opcode 4. j[l]: opcode 2 (Disp24 is the halfword offset field).
+static inline uint32_t encodeBC(uint8_t bc, int32_t disp19, bool link) { return enc32_BC(bc, disp19, link); }
 static inline uint32_t encodeBCOND(uint8_t bc, int32_t disp)  { return encodeBC(bc, disp, false); }
 static inline uint32_t encodeBCONDL(uint8_t bc, int32_t disp) { return encodeBC(bc, disp, true); }
-static inline uint32_t encodeJX(uint32_t disp24, bool lk)
+static inline uint32_t encodeJX(uint32_t disp24, bool lk)     { return enc32_J(disp24, lk); }
+
+// --- CR-form (opcode 6) ---
+static inline uint32_t encodeMTCR(uint8_t d, uint8_t crn) { return enc32_CR(d, crn, 0x00); }
+static inline uint32_t encodeMFCR(uint8_t d, uint8_t crn) { return enc32_CR(d, crn, 0x01); }
+static inline uint32_t encodeRTE()                        { return enc32_CR(0, 0, 0x84); }
+static inline uint32_t encodeDRTE()                       { return enc32_CR(0, 0, 0xA4); }
+static inline uint32_t encodeSLEEP()                      { return enc32_CR(0, 0, 0xC4); }
+
+// ============================================================
+// 16-bit ("!") instruction encoders (PDF 2.2; plan section 2.2).
+// P-bit = bit 15 = 0, OP = bits 14:12. Each returns the raw 16-bit instruction.
+// ============================================================
+
+// OP 0 / OP 2: rD[11:8] rA[7:4] func4[3:0]
+static inline uint16_t enc16_R(uint8_t op, uint8_t rd, uint8_t ra, uint8_t func4)
 {
-    // Disp24[23:14] -> bits 25:16, Disp24[13:0] -> bits 14:1, bit 15 = P-bit.
-    return 0x80000000u | (0x02u << 26)  // OP_JX=0x02 (was 0x19)
-         | (((disp24 >> 14) & 0x3FFu) << 16)
-         | (1u << 15)
-         | ((disp24 & 0x3FFFu) << 1)
-         | (lk ? 1u : 0u);
+    return (uint16_t)(((op & 0x7) << 12) | ((rd & 0xF) << 8) | ((ra & 0xF) << 4) | (func4 & 0xF));
 }
-static inline uint32_t encodeBR(uint8_t bc, uint8_t a)
+// OP 3: Disp11[11:1] LK[0]
+static inline uint16_t enc16_J(uint16_t disp11, bool lk)
 {
-    return 0x80000000u | (0x1Au << 26)
-         | ((uint32_t)(bc & 0xF) << 22)
-         | ((uint32_t)(a & 0x1F) << 16);
+    return (uint16_t)((0x3 << 12) | ((disp11 & 0x7FF) << 1) | (lk ? 1 : 0));
 }
-static inline uint32_t encodeBRL(uint8_t bc, uint8_t a)
+// OP 4: EC[11:8] Disp8[7:0]
+static inline uint16_t enc16_BX(uint8_t ec, int8_t disp8)
 {
-    return 0x80000000u | (0x1Eu << 26)
-         | ((uint32_t)(bc & 0xF) << 22)
-         | ((uint32_t)(a & 0x1F) << 16);
+    return (uint16_t)((0x4 << 12) | ((ec & 0xF) << 8) | (uint8_t)disp8);
+}
+// OP 5: rD[11:8] Imm8[7:0]
+static inline uint16_t enc16_I2(uint8_t rd, uint8_t imm8)
+{
+    return (uint16_t)((0x5 << 12) | ((rd & 0xF) << 8) | imm8);
+}
+// OP 6 / OP 7: rD[11:8] Imm5[7:3] func3[2:0]
+static inline uint16_t enc16_I1(uint8_t op, uint8_t rd, uint8_t imm5, uint8_t func3)
+{
+    return (uint16_t)(((op & 0x7) << 12) | ((rd & 0xF) << 8) | ((imm5 & 0x1F) << 3) | (func3 & 0x7));
+}
+// push!/pop! (OP 2, func4 E/A): rDg[11:8] plus H = bit 7 (rDg bit 4), rAg[6:4] (r0-r7).
+static inline uint16_t enc16_push(uint8_t rdg, uint8_t rag)
+{
+    return (uint16_t)((0x2 << 12) | ((rdg & 0xF) << 8) | (((rdg >> 4) & 1) << 7) | ((rag & 0x7) << 4) | 0xE);
+}
+static inline uint16_t enc16_pop(uint8_t rdg, uint8_t rag)
+{
+    return (uint16_t)((0x2 << 12) | ((rdg & 0xF) << 8) | (((rdg >> 4) & 1) << 7) | ((rag & 0x7) << 4) | 0xA);
 }
 
-// --- Rotate through carry (func6 0x17-0x1A) ---
-static inline uint32_t encodeROLC(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(0x17, d, a, b, cu); }
-static inline uint32_t encodeROLIC(uint8_t d, uint8_t a, uint8_t sa, bool cu) { return encR(EF6_ROLIC, d, a, sa, cu); }
-static inline uint32_t encodeRORC(uint8_t d, uint8_t a, uint8_t b, bool cu) { return encR(0x19, d, a, b, cu); }
-static inline uint32_t encodeRORIC(uint8_t d, uint8_t a, uint8_t sa, bool cu) { return encR(EF6_RORIC, d, a, sa, cu); }
+// OP 0
+static inline uint16_t encodeNOP16()                   { return enc16_R(0, 0, 0, 0x0); }
+static inline uint16_t encodeMLFH16(uint8_t d, uint8_t a) { return enc16_R(0, d, a, 0x1); }  // rD = r(16+rA)
+static inline uint16_t encodeMHFL16(uint8_t d, uint8_t a) { return enc16_R(0, d, a, 0x2); }  // r(16+rD) = rA
+static inline uint16_t encodeMV16(uint8_t d, uint8_t a)   { return enc16_R(0, d, a, 0x3); }
+static inline uint16_t encodeBRCOND16(uint8_t ec, uint8_t a)  { return enc16_R(0, ec, a, 0x4); }
+static inline uint16_t encodeTCOND16(uint8_t ec)          { return enc16_R(0, ec, 0, 0x5); }
+static inline uint16_t encodeSLL16(uint8_t d, uint8_t a)  { return enc16_R(0, d, a, 0x8); }
+static inline uint16_t encodeADDC16(uint8_t d, uint8_t a) { return enc16_R(0, d, a, 0x9); }
+static inline uint16_t encodeSRL16(uint8_t d, uint8_t a)  { return enc16_R(0, d, a, 0xA); }
+static inline uint16_t encodeSRA16(uint8_t d, uint8_t a)  { return enc16_R(0, d, a, 0xB); }
+static inline uint16_t encodeBRLCOND16(uint8_t ec, uint8_t a) { return enc16_R(0, ec, a, 0xC); }
+// OP 2
+static inline uint16_t encodeADD16(uint8_t d, uint8_t a)  { return enc16_R(2, d, a, 0x0); }
+static inline uint16_t encodeSUB16(uint8_t d, uint8_t a)  { return enc16_R(2, d, a, 0x1); }
+static inline uint16_t encodeNEG16(uint8_t d, uint8_t a)  { return enc16_R(2, d, a, 0x2); }
+static inline uint16_t encodeCMP16(uint8_t d, uint8_t a)  { return enc16_R(2, d, a, 0x3); }
+static inline uint16_t encodeAND16(uint8_t d, uint8_t a)  { return enc16_R(2, d, a, 0x4); }
+static inline uint16_t encodeOR16(uint8_t d, uint8_t a)   { return enc16_R(2, d, a, 0x5); }
+static inline uint16_t encodeNOT16(uint8_t d, uint8_t a)  { return enc16_R(2, d, a, 0x6); }
+static inline uint16_t encodeXOR16(uint8_t d, uint8_t a)  { return enc16_R(2, d, a, 0x7); }
+static inline uint16_t encodeLW16(uint8_t d, uint8_t a)   { return enc16_R(2, d, a, 0x8); }
+static inline uint16_t encodeLH16(uint8_t d, uint8_t a)   { return enc16_R(2, d, a, 0x9); }
+static inline uint16_t encodeLBU16(uint8_t d, uint8_t a)  { return enc16_R(2, d, a, 0xB); }
+static inline uint16_t encodeSW16(uint8_t d, uint8_t a)   { return enc16_R(2, d, a, 0xC); }
+static inline uint16_t encodeSH16(uint8_t d, uint8_t a)   { return enc16_R(2, d, a, 0xD); }
+static inline uint16_t encodeSB16(uint8_t d, uint8_t a)   { return enc16_R(2, d, a, 0xF); }
+// d = r0-r15 (or r16-r31 when `high`), a = r0-r7 base register
+static inline uint16_t encodePOP16(uint8_t d, uint8_t a, bool high)  { return enc16_pop((uint8_t)((d & 0xF) | (high ? 0x10 : 0)), a); }
+static inline uint16_t encodePUSH16(uint8_t d, uint8_t a, bool high) { return enc16_push((uint8_t)((d & 0xF) | (high ? 0x10 : 0)), a); }
+// OP 3 / OP 4 / OP 5
+static inline uint16_t encodeJX16(uint16_t disp11, bool lk)        { return enc16_J(disp11, lk); }
+static inline uint16_t encodeBCOND16(uint8_t ec, int8_t disp8)     { return enc16_BX(ec, disp8); }
+static inline uint16_t encodeB16(uint8_t ec, int8_t disp8)         { return enc16_BX(ec, disp8); }
+static inline uint16_t encodeLDIU16(uint8_t d, uint8_t imm8)       { return enc16_I2(d, imm8); }
+// OP 6: addei!/subei! take a 4-bit value (Imm5 bit 4 selects subtract); the rest take Imm5.
+static inline uint16_t encodeADDEI16(uint8_t d, uint8_t imm4)  { return enc16_I1(6, d, imm4 & 0xF, 0); }
+static inline uint16_t encodeSUBEI16(uint8_t d, uint8_t imm4)  { return enc16_I1(6, d, 0x10 | (imm4 & 0xF), 0); }
+static inline uint16_t encodeSLLI16(uint8_t d, uint8_t sa5)    { return enc16_I1(6, d, sa5, 1); }
+static inline uint16_t encodeSDBBP16(uint8_t d = 0, uint8_t imm5 = 0)  { return enc16_I1(6, d, imm5, 2); }
+static inline uint16_t encodeSRLI16(uint8_t d, uint8_t sa5)    { return enc16_I1(6, d, sa5, 3); }
+static inline uint16_t encodeBITCLR16(uint8_t d, uint8_t bn)   { return enc16_I1(6, d, bn, 4); }
+static inline uint16_t encodeBITSET16(uint8_t d, uint8_t bn)   { return enc16_I1(6, d, bn, 5); }
+static inline uint16_t encodeBITTST16(uint8_t d, uint8_t bn)   { return enc16_I1(6, d, bn, 6); }
+static inline uint16_t encodeBITTGL16(uint8_t d, uint8_t bn)   { return enc16_I1(6, d, bn, 7); }
+// OP 7: BP (r2)-relative. `imm5` is the raw field; the address offset is imm5<<2 (word),
+// imm5<<1 (half) or imm5 (byte).
+static inline uint16_t encodeLWP16(uint8_t d, uint8_t imm5)  { return enc16_I1(7, d, imm5, 0); }
+static inline uint16_t encodeLHP16(uint8_t d, uint8_t imm5)  { return enc16_I1(7, d, imm5, 1); }
+static inline uint16_t encodeLBUP16(uint8_t d, uint8_t imm5) { return enc16_I1(7, d, imm5, 3); }
+static inline uint16_t encodeSWP16(uint8_t d, uint8_t imm5)  { return enc16_I1(7, d, imm5, 4); }
+static inline uint16_t encodeSHP16(uint8_t d, uint8_t imm5)  { return enc16_I1(7, d, imm5, 5); }
+static inline uint16_t encodeSBP16(uint8_t d, uint8_t imm5)  { return enc16_I1(7, d, imm5, 7); }
 
-// --- Saturating arithmetic (func6 0x1B-0x1E) ---
-static inline uint32_t encodeADDS(uint8_t d, uint8_t a, uint8_t b) { return encR(EF6_ADDS, d, a, b, false); }
-static inline uint32_t encodeSUBS(uint8_t d, uint8_t a, uint8_t b) { return encR(EF6_SUBS, d, a, b, false); }
-static inline uint32_t encodeABSS(uint8_t d, uint8_t a) { return encR(0x1D, d, a, 0, false); }
-static inline uint32_t encodeSLLS(uint8_t d, uint8_t a, uint8_t b) { return encR(EF6_SLLS, d, a, b, false); }
+// ============================================================
+// LEGACY encoders: instructions that do NOT exist on S+core7, or whose real
+// encoding is not yet known (custom engine / coprocessor forms). They keep the
+// emulator's old invented layouts so the existing tests that use them still
+// compile. They are deleted together with their tests in plan stories 7a-7c
+// (invented instructions) and when the coprocessor Form pages are read.
+// Do not use them in new tests, and do not cross-check them against the
+// disassembler.
+// ============================================================
 
-// --- Custom engine: 32-bit fractional multiply-subtract (func6 0x1F) ---
-static inline uint32_t encodeMSBF(uint8_t a, uint8_t b) { return encR(0x1F, 0, a, b, false); }
+// Old-layout builders (no P-bit 15, as the previous encoders produced).
+static inline uint32_t legacyEncR(uint32_t func6, uint8_t d, uint8_t a, uint8_t b, bool cu)
+{
+    return 0x80000000u
+         | ((uint32_t)(d & 0x1F) << 21) | ((uint32_t)(a & 0x1F) << 16)
+         | ((uint32_t)(b & 0x1F) << 10) | ((func6 & 0x3F) << 1) | (cu ? 1u : 0u);
+}
+// I-type-2 (placeholder opcode 0x03, which is really pre-index RIX): SUBIX/SUBISX.
+static inline uint32_t legacyEncI2(uint32_t func3, uint8_t d, uint16_t imm16, bool cu)
+{
+    return 0x80000000u | (0x03u << 26)
+         | ((uint32_t)(d & 0x1F) << 21) | ((func3 & 0x7) << 18)
+         | ((uint32_t)((imm16 >> 14) & 0x3) << 16) | (1u << 15)
+         | ((uint32_t)(imm16 & 0x3FFF) << 1) | (cu ? 1u : 0u);
+}
+static inline uint32_t legacyEncRIX(uint32_t opcode, uint8_t d, uint8_t a, uint16_t imm14, bool cu)
+{
+    return 0x80000000u | ((opcode & 0x1F) << 26)
+         | ((uint32_t)(d & 0x1F) << 21) | ((uint32_t)(a & 0x1F) << 16)
+         | ((uint32_t)(imm14 & 0x3FFF) << 1) | (cu ? 1u : 0u);
+}
+static inline uint32_t encodeSUBIX(uint8_t d, uint16_t imm16, bool cu)  { return legacyEncI2(1, d, imm16, cu); }
+static inline uint32_t encodeSUBISX(uint8_t d, uint16_t imm16, bool cu) { return legacyEncI2(2, d, imm16, cu); }
+static inline uint32_t encodeSUBRIX(uint8_t d, uint8_t a, uint16_t imm14, bool cu) { return legacyEncRIX(0x0F, d, a, imm14, cu); }
 
-// --- Half-word multiply-accumulate family (opcode 0x1C) ---
+// Emulator-only func6 values (see plan section 2.4: to be deleted).
+enum : uint32_t {
+    LEF6_MVCOND=0x26, LEF6_REM=0x27, LEF6_REMU=0x2A,
+    LEF6_MAD=0x0C, LEF6_MADU=0x0D, LEF6_MSB=0x0E, LEF6_MSBU=0x32,
+    LEF6_ADDS=0x2B, LEF6_SUBS=0x30, LEF6_SLLS=0x31, LEF6_ABSS=0x1D, LEF6_MSBF=0x1F,
+    LEF6_CLZ=0x34, LEF6_ABS=0x35, LEF6_MIN=0x36, LEF6_MAX=0x37, LEF6_BITREV=0x33,
+    LEF6_MULF=0x15, LEF6_MADF=0x16
+};
+static inline uint32_t encodeCLZ(uint8_t d, uint8_t a) { return legacyEncR(LEF6_CLZ, d, a, 0, false); }
+static inline uint32_t encodeABS(uint8_t d, uint8_t a) { return legacyEncR(LEF6_ABS, d, a, 0, false); }
+static inline uint32_t encodeMIN(uint8_t d, uint8_t a, uint8_t b) { return legacyEncR(LEF6_MIN, d, a, b, false); }
+static inline uint32_t encodeMAX(uint8_t d, uint8_t a, uint8_t b) { return legacyEncR(LEF6_MAX, d, a, b, false); }
+static inline uint32_t encodeBITREV(uint8_t d, uint8_t a, uint8_t b) { return legacyEncR(LEF6_BITREV, d, a, b, false); }
+static inline uint32_t encodeREM(uint8_t d, uint8_t a, uint8_t b) { return legacyEncR(LEF6_REM, d, a, b, false); }
+static inline uint32_t encodeREMU(uint8_t d, uint8_t a, uint8_t b) { return legacyEncR(LEF6_REMU, d, a, b, false); }
+static inline uint32_t encodeMAD(uint8_t a, uint8_t b)  { return legacyEncR(LEF6_MAD, 0, a, b, false); }
+static inline uint32_t encodeMADU(uint8_t a, uint8_t b) { return legacyEncR(LEF6_MADU, 0, a, b, false); }
+static inline uint32_t encodeMSB(uint8_t a, uint8_t b)  { return legacyEncR(LEF6_MSB, 0, a, b, false); }
+static inline uint32_t encodeMSBU(uint8_t a, uint8_t b) { return legacyEncR(LEF6_MSBU, 0, a, b, false); }
+static inline uint32_t encodeMULF(uint8_t a, uint8_t b) { return legacyEncR(LEF6_MULF, 0, a, b, false); }
+static inline uint32_t encodeMADF(uint8_t a, uint8_t b) { return legacyEncR(LEF6_MADF, 0, a, b, false); }
+static inline uint32_t encodeADDS(uint8_t d, uint8_t a, uint8_t b) { return legacyEncR(LEF6_ADDS, d, a, b, false); }
+static inline uint32_t encodeSUBS(uint8_t d, uint8_t a, uint8_t b) { return legacyEncR(LEF6_SUBS, d, a, b, false); }
+static inline uint32_t encodeABSS(uint8_t d, uint8_t a) { return legacyEncR(LEF6_ABSS, d, a, 0, false); }
+static inline uint32_t encodeSLLS(uint8_t d, uint8_t a, uint8_t b) { return legacyEncR(LEF6_SLLS, d, a, b, false); }
+static inline uint32_t encodeMSBF(uint8_t a, uint8_t b) { return legacyEncR(LEF6_MSBF, 0, a, b, false); }
+
+// Half-word multiply-accumulate family (invented opcode 0x1C; the real 0x1C is CENew).
 // HZFSU control field occupies bits [25:21].
 static inline uint32_t encHWMAC(uint8_t hzfsu, uint8_t a, uint8_t b)
 {
@@ -461,189 +578,26 @@ static inline uint32_t encHWMAC(uint8_t hzfsu, uint8_t a, uint8_t b)
          | ((uint32_t)(b & 0x1F) << 10);
 }
 // HZFSU bit layout: H=0x10, Z=0x08, F=0x04, S=0x02, U=0x01.
-// Lower-half forms (H=0):
-static inline uint32_t encodeMAZL(uint8_t a, uint8_t b)   { return encHWMAC(0x08, a, b); }            // Z
-static inline uint32_t encodeMADL(uint8_t a, uint8_t b)   { return encHWMAC(0x00, a, b); }            // -
-static inline uint32_t encodeMSZL(uint8_t a, uint8_t b)   { return encHWMAC(0x0A, a, b); }            // Z,S
-static inline uint32_t encodeMSBL(uint8_t a, uint8_t b)   { return encHWMAC(0x02, a, b); }            // S
-static inline uint32_t encodeMAZLF(uint8_t a, uint8_t b)  { return encHWMAC(0x0C, a, b); }            // Z,F
-static inline uint32_t encodeMSZLF(uint8_t a, uint8_t b)  { return encHWMAC(0x0E, a, b); }            // Z,S,F
-static inline uint32_t encodeMADLFS(uint8_t a, uint8_t b) { return encHWMAC(0x04, a, b); }            // F (sat)
-static inline uint32_t encodeMSBLFS(uint8_t a, uint8_t b) { return encHWMAC(0x06, a, b); }            // S,F (sat)
-// Higher-half forms (H=1):
-static inline uint32_t encodeMAZH(uint8_t a, uint8_t b)   { return encHWMAC(0x18, a, b); }            // H,Z
-static inline uint32_t encodeMADH(uint8_t a, uint8_t b)   { return encHWMAC(0x10, a, b); }            // H
-static inline uint32_t encodeMSZH(uint8_t a, uint8_t b)   { return encHWMAC(0x1A, a, b); }            // H,Z,S
-static inline uint32_t encodeMSBH(uint8_t a, uint8_t b)   { return encHWMAC(0x12, a, b); }            // H,S
-static inline uint32_t encodeMAZHF(uint8_t a, uint8_t b)  { return encHWMAC(0x1C, a, b); }            // H,Z,F
-static inline uint32_t encodeMSZHF(uint8_t a, uint8_t b)  { return encHWMAC(0x1E, a, b); }            // H,Z,S,F
-static inline uint32_t encodeMADHFS(uint8_t a, uint8_t b) { return encHWMAC(0x14, a, b); }            // H,F (sat)
-static inline uint32_t encodeMSBHFS(uint8_t a, uint8_t b) { return encHWMAC(0x16, a, b); }            // H,S,F (sat)
+static inline uint32_t encodeMAZL(uint8_t a, uint8_t b)   { return encHWMAC(0x08, a, b); }
+static inline uint32_t encodeMADL(uint8_t a, uint8_t b)   { return encHWMAC(0x00, a, b); }
+static inline uint32_t encodeMSZL(uint8_t a, uint8_t b)   { return encHWMAC(0x0A, a, b); }
+static inline uint32_t encodeMSBL(uint8_t a, uint8_t b)   { return encHWMAC(0x02, a, b); }
+static inline uint32_t encodeMAZLF(uint8_t a, uint8_t b)  { return encHWMAC(0x0C, a, b); }
+static inline uint32_t encodeMSZLF(uint8_t a, uint8_t b)  { return encHWMAC(0x0E, a, b); }
+static inline uint32_t encodeMADLFS(uint8_t a, uint8_t b) { return encHWMAC(0x04, a, b); }
+static inline uint32_t encodeMSBLFS(uint8_t a, uint8_t b) { return encHWMAC(0x06, a, b); }
+static inline uint32_t encodeMAZH(uint8_t a, uint8_t b)   { return encHWMAC(0x18, a, b); }
+static inline uint32_t encodeMADH(uint8_t a, uint8_t b)   { return encHWMAC(0x10, a, b); }
+static inline uint32_t encodeMSZH(uint8_t a, uint8_t b)   { return encHWMAC(0x1A, a, b); }
+static inline uint32_t encodeMSBH(uint8_t a, uint8_t b)   { return encHWMAC(0x12, a, b); }
+static inline uint32_t encodeMAZHF(uint8_t a, uint8_t b)  { return encHWMAC(0x1C, a, b); }
+static inline uint32_t encodeMSZHF(uint8_t a, uint8_t b)  { return encHWMAC(0x1E, a, b); }
+static inline uint32_t encodeMADHFS(uint8_t a, uint8_t b) { return encHWMAC(0x14, a, b); }
+static inline uint32_t encodeMSBHFS(uint8_t a, uint8_t b) { return encHWMAC(0x16, a, b); }
 
-// --- Pre/post-index load/store family (opcode 0x1B) ---
-// sub-op[15:13], signed Imm12[12:1], pre-index flag at bit 0.
-static inline uint32_t encLSU(uint8_t sub, uint8_t d, uint8_t a, int16_t imm12, bool pre)
-{
-    return 0x80000000u | (0x1Bu << 26)
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((uint32_t)(a & 0x1F) << 16)
-         | ((uint32_t)(sub & 0x7) << 13)
-         | (((uint32_t)imm12 & 0xFFF) << 1)
-         | (pre ? 1u : 0u);
-}
-static inline uint32_t encodeLW_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return encLSU(0, d, a, imm, pre); }
-static inline uint32_t encodeSW_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return encLSU(1, d, a, imm, pre); }
-static inline uint32_t encodeLBU_idx(uint8_t d, uint8_t a, int16_t imm, bool pre) { return encLSU(2, d, a, imm, pre); }
-static inline uint32_t encodeLB_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return encLSU(3, d, a, imm, pre); }
-static inline uint32_t encodeLHU_idx(uint8_t d, uint8_t a, int16_t imm, bool pre) { return encLSU(4, d, a, imm, pre); }
-static inline uint32_t encodeLH_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return encLSU(5, d, a, imm, pre); }
-static inline uint32_t encodeSB_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return encLSU(6, d, a, imm, pre); }
-static inline uint32_t encodeSH_idx(uint8_t d, uint8_t a, int16_t imm, bool pre)  { return encLSU(7, d, a, imm, pre); }
-
-// ============================================================
-// 16-bit ("!") instruction encoders. All clear bit 31 so the decoder
-// routes them through decode16(). See the layout in src/spg290.h.
-//
-// The payload is placed in the UPPER 16 bits of the returned word: a lone
-// 16-bit instruction is the first halfword fetched at its address (byte-
-// addressed, big-endian), so it must occupy the high half, not the low
-// half. The low 16 bits are left as 0 (decodes as a harmless add! r0,r0
-// no-op if ever reached, e.g. by a ROM program's sequential fetch).
-// ============================================================
-
-// op16 0x0 : RR-ALU  (func4, rD, rA)
-static inline uint32_t enc16_rr(uint8_t func4, uint8_t d, uint8_t a)
-{
-    return (((uint32_t)0x0 << 12) | ((uint32_t)(func4 & 0xF) << 8)
-         | ((uint32_t)(d & 0xF) << 4) | (uint32_t)(a & 0xF)) << 16;
-}
-static inline uint32_t encodeADD16(uint8_t d, uint8_t a)  { return enc16_rr(0, d, a); }
-static inline uint32_t encodeADDC16(uint8_t d, uint8_t a) { return enc16_rr(1, d, a); }
-static inline uint32_t encodeSUB16(uint8_t d, uint8_t a)  { return enc16_rr(2, d, a); }
-static inline uint32_t encodeAND16(uint8_t d, uint8_t a)  { return enc16_rr(3, d, a); }
-static inline uint32_t encodeOR16(uint8_t d, uint8_t a)   { return enc16_rr(4, d, a); }
-static inline uint32_t encodeXOR16(uint8_t d, uint8_t a)  { return enc16_rr(5, d, a); }
-static inline uint32_t encodeMV16(uint8_t d, uint8_t a)   { return enc16_rr(6, d, a); }
-static inline uint32_t encodeNEG16(uint8_t d, uint8_t a)  { return enc16_rr(7, d, a); }
-static inline uint32_t encodeNOT16(uint8_t d, uint8_t a)  { return enc16_rr(8, d, a); }
-static inline uint32_t encodeCMP16(uint8_t d, uint8_t a)  { return enc16_rr(9, d, a); }
-static inline uint32_t encodeSLL16(uint8_t d, uint8_t a)  { return enc16_rr(10, d, a); }
-static inline uint32_t encodeSRL16(uint8_t d, uint8_t a)  { return enc16_rr(11, d, a); }
-static inline uint32_t encodeSRA16(uint8_t d, uint8_t a)  { return enc16_rr(12, d, a); }
-
-// op16 0x1 : ldiu!  (rD, Imm8)
-static inline uint32_t encodeLDIU16(uint8_t d, uint8_t imm8)
-{
-    return (((uint32_t)0x1 << 12) | ((uint32_t)(d & 0xF) << 8) | (uint32_t)imm8) << 16;
-}
-
-// op16 0x2 : R-Imm  (func2, rD, Imm)
-static inline uint32_t enc16_rimm(uint8_t func2, uint8_t d, uint8_t imm)
-{
-    return (((uint32_t)0x2 << 12) | ((uint32_t)(func2 & 0x3) << 10)
-         | ((uint32_t)(d & 0xF) << 6) | (uint32_t)(imm & 0x3F)) << 16;
-}
-static inline uint32_t encodeSLLI16(uint8_t d, uint8_t sa5)   { return enc16_rimm(0, d, sa5 & 0x1F); }
-static inline uint32_t encodeSRLI16(uint8_t d, uint8_t sa5)   { return enc16_rimm(1, d, sa5 & 0x1F); }
-static inline uint32_t encodeADDEI16(uint8_t d, uint8_t imm4) { return enc16_rimm(2, d, imm4 & 0xF); }
-static inline uint32_t encodeSUBEI16(uint8_t d, uint8_t imm4) { return enc16_rimm(3, d, imm4 & 0xF); }
-
-// op16 0x3 : bittst!  (rD, BN)
-static inline uint32_t encodeBITTST16(uint8_t d, uint8_t bn)
-{
-    return (((uint32_t)0x3 << 12) | ((uint32_t)(d & 0xF) << 8) | ((uint32_t)(bn & 0x1F) << 3)) << 16;
-}
-
-// op16 0x4 : cross-bank moves  (func1, rD, rA)
-static inline uint32_t encodeMLFH16(uint8_t d, uint8_t a)  // rD(lo) = rA(hi)
-{
-    return (((uint32_t)0x4 << 12) | ((uint32_t)(d & 0xF) << 4) | (uint32_t)(a & 0xF)) << 16;
-}
-static inline uint32_t encodeMHFL16(uint8_t d, uint8_t a)  // rD(hi) = rA(lo)
-{
-    return (((uint32_t)0x4 << 12) | ((uint32_t)0x1 << 11)
-         | ((uint32_t)(d & 0xF) << 4) | (uint32_t)(a & 0xF)) << 16;
-}
-
-// op16 0x5 : memory simple  (func3, rD, rA)
-static inline uint32_t enc16_mem(uint8_t func3, uint8_t d, uint8_t a)
-{
-    return (((uint32_t)0x5 << 12) | ((uint32_t)(func3 & 0x7) << 9)
-         | ((uint32_t)(d & 0xF) << 5) | ((uint32_t)(a & 0xF) << 1)) << 16;
-}
-static inline uint32_t encodeLW16(uint8_t d, uint8_t a)  { return enc16_mem(0, d, a); }
-static inline uint32_t encodeLH16(uint8_t d, uint8_t a)  { return enc16_mem(1, d, a); }
-static inline uint32_t encodeLBU16(uint8_t d, uint8_t a) { return enc16_mem(2, d, a); }
-static inline uint32_t encodeSW16(uint8_t d, uint8_t a)  { return enc16_mem(3, d, a); }
-static inline uint32_t encodeSH16(uint8_t d, uint8_t a)  { return enc16_mem(4, d, a); }
-static inline uint32_t encodeSB16(uint8_t d, uint8_t a)  { return enc16_mem(5, d, a); }
-
-// op16 0x6 : memory BP-relative  (func3, rD, Imm5)  (BP = r2)
-static inline uint32_t enc16_membp(uint8_t func3, uint8_t d, uint8_t imm5)
-{
-    return (((uint32_t)0x6 << 12) | ((uint32_t)(func3 & 0x7) << 9)
-         | ((uint32_t)(d & 0xF) << 5) | (uint32_t)(imm5 & 0x1F)) << 16;
-}
-static inline uint32_t encodeLWP16(uint8_t d, uint8_t imm5)  { return enc16_membp(0, d, imm5); }
-static inline uint32_t encodeLHP16(uint8_t d, uint8_t imm5)  { return enc16_membp(1, d, imm5); }
-static inline uint32_t encodeLBUP16(uint8_t d, uint8_t imm5) { return enc16_membp(2, d, imm5); }
-static inline uint32_t encodeSWP16(uint8_t d, uint8_t imm5)  { return enc16_membp(3, d, imm5); }
-static inline uint32_t encodeSHP16(uint8_t d, uint8_t imm5)  { return enc16_membp(4, d, imm5); }
-static inline uint32_t encodeSBP16(uint8_t d, uint8_t imm5)  { return enc16_membp(5, d, imm5); }
-
-// op16 0x7 : extended group. A lone 16-bit instruction only has 15 usable
-// payload bits (bit 15 is the hardware P-bit, confirmed in s_core7.pdf), so
-// the real main opcode is 3 bits (14:12) -- sub[11:8] multiplexes
-// stack/b{cond}!/br{cond}!/jx!/system into this one remaining slot for now
-// (bit-exact real encodings are deferred to the ISA audit against the spec).
-static inline uint32_t enc16_group7(uint8_t sub)
-{
-    return ((uint32_t)0x7 << 12) | ((uint32_t)(sub & 0xF) << 8);
-}
-
-// sub 0x0 : stack  (func1, H, rD[2:0], rA[2:0])
-static inline uint32_t encodePOP16(uint8_t d, uint8_t a, bool high)
-{
-    return (enc16_group7(0x0) | ((uint32_t)(high ? 1u : 0u) << 6)
-         | ((uint32_t)(d & 0x7) << 3) | (uint32_t)(a & 0x7)) << 16;
-}
-static inline uint32_t encodePUSH16(uint8_t d, uint8_t a, bool high)
-{
-    return (enc16_group7(0x0) | ((uint32_t)0x1 << 7) | ((uint32_t)(high ? 1u : 0u) << 6)
-         | ((uint32_t)(d & 0x7) << 3) | (uint32_t)(a & 0x7)) << 16;
-}
-
-// sub 0x1 : b{cond}!  (cond, Disp4 -- reduced width, see enc16_group7 note)
-static inline uint32_t encodeBCOND16(uint8_t cond, int8_t disp4)
-{
-    return (enc16_group7(0x1) | ((uint32_t)(cond & 0xF) << 4) | (uint32_t)((uint8_t)disp4 & 0xF)) << 16;
-}
-
-// sub 0x2 : br{cond}!  (cond, rA[2:0])
-static inline uint32_t encodeBRCOND16(uint8_t cond, uint8_t a)
-{
-    return (enc16_group7(0x2) | ((uint32_t)(cond & 0xF) << 4) | (uint32_t)(a & 0x7)) << 16;
-}
-
-// sub 0x3 : jx!  (LK, Disp7 -- reduced width, see enc16_group7 note)
-static inline uint32_t encodeJX16(uint16_t disp7, bool lk)
-{
-    return (enc16_group7(0x3) | ((uint32_t)(lk ? 1u : 0u) << 7) | (uint32_t)(disp7 & 0x7F)) << 16;
-}
-
-// sub 0x4 : system  (func2, cond)
-static inline uint32_t encodeNOP16()  { return enc16_group7(0x4) << 16; }
-static inline uint32_t encodeSDBBP16(){ return (enc16_group7(0x4) | ((uint32_t)0x1 << 6)) << 16; }
-static inline uint32_t encodeTCOND16(uint8_t cond)
-{
-    return (enc16_group7(0x4) | ((uint32_t)0x2 << 6) | ((uint32_t)(cond & 0xF) << 2)) << 16;
-}
-
-// ============================================================
-// System / coprocessor register moves (opcode 0x1F = OP_SYS).
-//   rD = bits 25:21, regnum/rA = bits 20:16, sub-op = bits 14:10,
-//   CP#/{HI,LO} = bits 9:8.
-// ============================================================
+// System / coprocessor register moves (invented opcode 0x1F = OP_SYS). The real
+// coprocessor forms (mtcx/mfcx/ldcx/stcx/copx) are not yet read from the PDF.
+//   rD = bits 25:21, regnum/rA = bits 20:16, sub-op = bits 14:10, CP#/{HI,LO} = bits 9:8.
 static inline uint32_t encSYS(uint8_t sub, uint8_t d, uint8_t regnum, uint8_t cp_hilo)
 {
     return 0x80000000u | ((uint32_t)0x1F << 26)
@@ -652,23 +606,6 @@ static inline uint32_t encSYS(uint8_t sub, uint8_t d, uint8_t regnum, uint8_t cp
          | ((uint32_t)(sub & 0x1F) << 10)
          | ((uint32_t)(cp_hilo & 0x3) << 8);
 }
-// CR-form (opcode 0x06), confirmed via score-elf-as. mfcr/mtcr share func6 0
-// and differ in CU (1 = mfcr, 0 = mtcr); rD = GPR, rA = control register.
-static inline uint32_t encCR(uint8_t func6, uint8_t d, uint8_t crn, bool cu)
-{
-    return 0x80000000u | ((uint32_t)0x06 << 26)
-         | ((uint32_t)(d & 0x1F) << 21)
-         | ((uint32_t)(crn & 0x1F) << 16)
-         | ((uint32_t)(func6 & 0x3F) << 1)
-         | (cu ? 1u : 0u);
-}
-static inline uint32_t encodeMFCR(uint8_t d, uint8_t crn)  { return encCR(0x00, d, crn, true); }
-static inline uint32_t encodeMTCR(uint8_t d, uint8_t crn)  { return encCR(0x00, d, crn, false); }
-// mfsr/mtsr: confirmed via score-elf-as to be ordinary R-type instructions
-// (func6 0x28/0x29), not OP_SYS sub-ops -- see spg290.h. mtsr's rD/rA roles
-// are swapped relative to mfsr (rD=srn, rA=source register).
-static inline uint32_t encodeMFSR(uint8_t d, uint8_t srn)  { return encR(0x28, d, srn, 0, false); }
-static inline uint32_t encodeMTSR(uint8_t a, uint8_t srn)  { return encR(0x29, srn, a, 0, false); }
 static inline uint32_t encodeMFCX(uint8_t d, uint8_t crn, uint8_t cp)  { return encSYS(0x04, d, crn, cp); }
 static inline uint32_t encodeMTCX(uint8_t d, uint8_t crn, uint8_t cp)  { return encSYS(0x05, d, crn, cp); }
 static inline uint32_t encodeMFCCX(uint8_t d, uint8_t crn, uint8_t cp) { return encSYS(0x06, d, crn, cp); }
@@ -676,20 +613,8 @@ static inline uint32_t encodeMTCCX(uint8_t d, uint8_t crn, uint8_t cp) { return 
 // mfcex / mtcex: hilo = {HI,LO} (1=L only, 2=H only, 3=both).
 static inline uint32_t encodeMFCEX(uint8_t d, uint8_t a, uint8_t hilo) { return encSYS(0x08, d, a, hilo); }
 static inline uint32_t encodeMTCEX(uint8_t d, uint8_t a, uint8_t hilo) { return encSYS(0x09, d, a, hilo); }
-static inline uint32_t encodeCOPX() { return encSYS(0x0A, 0, 0, 0); }
-// t{cond}: EC occupies the regnum field (bits 20:16) -- NOT re-verified this pass.
-static inline uint32_t encodeTCOND(uint8_t ec)    { return encSYS(0x0B, 0, ec, 0); }
-// trap{cond}/syscall: confirmed via score-elf-as to be ordinary R-type instructions
-// (func6 0x02/0x01), not OP_SYS sub-ops. trap{cond}'s EC lives in the rB field.
-static inline uint32_t encodeTRAPCOND(uint8_t ec) { return encR(0x02, 0, 0, ec, false); }
-static inline uint32_t encodeSYSCALL()            { return encR(0x01, 0, 0, 0, false); }
-static inline uint32_t encodeRTE()                { return encCR(0x02, 0, 0, false); }
-static inline uint32_t encodeDRTE()               { return encCR(0x12, 0, 0, false); }
-static inline uint32_t encodeSLEEP()              { return encCR(0x22, 0, 0, false); }
-static inline uint32_t encodeCACHE()              { return encSYS(0x11, 0, 0, 0); }
-static inline uint32_t encodePFLUSH()             { return encSYS(0x12, 0, 0, 0); }
-static inline uint32_t encodeSDBBP32()            { return encSYS(0x13, 0, 0, 0); }
-static inline uint32_t encodeCEINST()             { return encSYS(0x14, 0, 0, 0); }
+static inline uint32_t encodeCOPX()   { return encSYS(0x0A, 0, 0, 0); }
+static inline uint32_t encodeCEINST() { return encSYS(0x14, 0, 0, 0); }
 // ldcx / stcx: base GPR=bits 25:21, CrA=bits 20:16, CP#=bits 9:8, imm8=bits 7:0.
 static inline uint32_t encodeLDCX(uint8_t base, uint8_t creg, uint8_t cp, int8_t imm)
 {
@@ -699,11 +624,3 @@ static inline uint32_t encodeSTCX(uint8_t base, uint8_t creg, uint8_t cp, int8_t
 {
     return encSYS(0x16, base, creg, cp) | ((uint32_t)(uint8_t)imm);
 }
-// Load/store combine: rD = bits 25:21, rA (base) = bits 20:16.
-// lcb/sce take only a base register (rD field unused).
-static inline uint32_t encodeLCB(uint8_t a)            { return encSYS(0x17, 0, a, 0); }
-static inline uint32_t encodeLCW(uint8_t d, uint8_t a) { return encSYS(0x18, d, a, 0); }
-static inline uint32_t encodeLCE(uint8_t d, uint8_t a) { return encSYS(0x19, d, a, 0); }
-static inline uint32_t encodeSCB(uint8_t d, uint8_t a) { return encSYS(0x1A, d, a, 0); }
-static inline uint32_t encodeSCW(uint8_t d, uint8_t a) { return encSYS(0x1B, d, a, 0); }
-static inline uint32_t encodeSCE(uint8_t a)            { return encSYS(0x1C, 0, a, 0); }

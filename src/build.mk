@@ -64,6 +64,10 @@ clean:
 #
 # Usage: make -f build.mk test
 # ----------------------------------------------------------------
+# The conformance test links MAME's S+core7 disassembler as an independent decoder.
+SDIS_DIR       = ../tools/sdis
+SDIS_LIB_OBJS  = $(SDIS_DIR)/scoredsm.o $(SDIS_DIR)/score_disasm.o
+
 TEST_SRCS  = $(wildcard ../tests/*.cpp)
 TEST_OBJS  = $(patsubst ../tests/%.cpp, ../tests/%.o, $(TEST_SRCS))
 TEST_TARGET = ../tests/test_runner
@@ -72,12 +76,12 @@ TEST_TARGET = ../tests/test_runner
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
 
-$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o DiscImage.o $(TEST_OBJS)
+$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o DiscImage.o $(SDIS_LIB_OBJS) $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
-# Compile test sources with -I. so they can find Bus.h / spg290.h
-../tests/%.o: ../tests/%.cpp
-	$(CXX) $(CXXFLAGS) -I. -c $< -o $@
+# Compile test sources with -I. so they can find Bus.h / spg290.h (and -I$(SDIS_DIR) for score_disasm.h)
+../tests/%.o: ../tests/%.cpp ../tests/test_helpers.h
+	$(CXX) $(CXXFLAGS) -I. -I$(SDIS_DIR) -c $< -o $@
 
 # ----------------------------------------------------------------
 # ROM assembly target  —  requires score-elf-as from binutils 2.25
