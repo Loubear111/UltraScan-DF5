@@ -516,24 +516,24 @@ static inline uint16_t encodeSBP16(uint8_t d, uint8_t imm5)  { return enc16_I1(7
 // disassembler.
 // ============================================================
 
-// Old-layout builders (no P-bit 15, as the previous encoders produced).
+// Old-layout builders. P-bit 15 is set so the corrected fetch (plan 2.1) reads them as 32-bit.
 static inline uint32_t legacyEncR(uint32_t func6, uint8_t d, uint8_t a, uint8_t b, bool cu)
 {
-    return 0x80000000u
+    return 0x80008000u
          | ((uint32_t)(d & 0x1F) << 21) | ((uint32_t)(a & 0x1F) << 16)
          | ((uint32_t)(b & 0x1F) << 10) | ((func6 & 0x3F) << 1) | (cu ? 1u : 0u);
 }
 // I-type-2 (placeholder opcode 0x03, which is really pre-index RIX): SUBIX/SUBISX.
 static inline uint32_t legacyEncI2(uint32_t func3, uint8_t d, uint16_t imm16, bool cu)
 {
-    return 0x80000000u | (0x03u << 26)
+    return 0x80008000u | (0x03u << 26)
          | ((uint32_t)(d & 0x1F) << 21) | ((func3 & 0x7) << 18)
          | ((uint32_t)((imm16 >> 14) & 0x3) << 16) | (1u << 15)
          | ((uint32_t)(imm16 & 0x3FFF) << 1) | (cu ? 1u : 0u);
 }
 static inline uint32_t legacyEncRIX(uint32_t opcode, uint8_t d, uint8_t a, uint16_t imm14, bool cu)
 {
-    return 0x80000000u | ((opcode & 0x1F) << 26)
+    return 0x80008000u | ((opcode & 0x1F) << 26)
          | ((uint32_t)(d & 0x1F) << 21) | ((uint32_t)(a & 0x1F) << 16)
          | ((uint32_t)(imm14 & 0x3FFF) << 1) | (cu ? 1u : 0u);
 }
@@ -572,7 +572,7 @@ static inline uint32_t encodeMSBF(uint8_t a, uint8_t b) { return legacyEncR(LEF6
 // HZFSU control field occupies bits [25:21].
 static inline uint32_t encHWMAC(uint8_t hzfsu, uint8_t a, uint8_t b)
 {
-    return 0x80000000u | (0x1Cu << 26)
+    return 0x80008000u | (0x1Cu << 26)
          | ((uint32_t)(hzfsu & 0x1F) << 21)
          | ((uint32_t)(a & 0x1F) << 16)
          | ((uint32_t)(b & 0x1F) << 10);
@@ -600,7 +600,7 @@ static inline uint32_t encodeMSBHFS(uint8_t a, uint8_t b) { return encHWMAC(0x16
 //   rD = bits 25:21, regnum/rA = bits 20:16, sub-op = bits 14:10, CP#/{HI,LO} = bits 9:8.
 static inline uint32_t encSYS(uint8_t sub, uint8_t d, uint8_t regnum, uint8_t cp_hilo)
 {
-    return 0x80000000u | ((uint32_t)0x1F << 26)
+    return 0x80008000u | ((uint32_t)0x1F << 26)
          | ((uint32_t)(d & 0x1F) << 21)
          | ((uint32_t)(regnum & 0x1F) << 16)
          | ((uint32_t)(sub & 0x1F) << 10)

@@ -82,35 +82,45 @@ void spg290::clock()
 			return;
 		}
 
-		// Score7 instructions are 16-bit or 32-bit, byte-addressed and packed
-		// at their natural size (not one fixed-width slot per instruction).
-		// The first halfword's own MSB is the "P-bit": 1 starts a 32-bit
-		// instruction (fetch the whole word at pc, in the Bus's byte order,
-		// so no endian-specific code is needed here), 0 means it is itself a
-		// complete 16-bit instruction.
-		uint16_t first = readHalf(pc);
-		if (first & 0x8000u)
+		// Fetch (PDF 1.1; the parallel pair follows MAME's execute_run).
+		// The aligned word is classified by its two P-bits, w[31] and w[15],
+		// read in the Bus's byte order so no endian-specific code is needed:
+		//   0/0  two 16-bit instructions: run the halfword at pc, pc += 2
+		//   0/1  invalid pair: P_EL exception, pc += 4
+		//   1/0  parallel pair: low 15 bits if T = 1, else high 15 bits, pc += 4
+		//   1/1  one 32-bit instruction, pc += 4
+		// At pc&2 the instruction is always the 16-bit halfword at pc.
+		const uint32_t w = readWord(pc & ~3u);
+		const bool p31 = (w & 0x80000000u) != 0;
+		const bool p15 = (w & 0x00008000u) != 0;
+		const bool aligned = (pc & 2u) == 0;
+
+		if (!aligned || (!p31 && !p15))
 		{
-			instr = readWord(pc);
-			instrSize = 4;
-			pc += 4;
-		}
-		else
-		{
-			instr = first;   // decode16() reads this back out of the low 16 bits
+			instr = readHalf(pc);   // decode16() reads this from the low 16 bits
 			instrSize = 2;
 			pc += 2;
-		}
-
-		// Bit 31 is the 32-bit instruction indicator. When it is clear,
-		// the word holds a 16-bit ("!") instruction in its low 16 bits.
-		if ((instr & 0x80000000u) == 0)
-		{
 			decode16();
-			cycles = 1;
-			cycles--;
 			return;
 		}
+
+		instrSize = 4;
+		pc += 4;
+
+		if (!p31)   // 0/1
+		{
+			raiseException(EXC_PEL);
+			return;
+		}
+
+		if (!p15)   // 1/0: both halves are 15-bit instructions, decoded as 16-bit with P = 0
+		{
+			instr = GetFlag(T) ? (w & 0x7FFFu) : ((w >> 16) & 0x7FFFu);
+			decode16();
+			return;
+		}
+
+		instr = w;
 
 		// Extract opcode from instruction word
 		// opcode is bits 30-26 so we must shift it over after masking

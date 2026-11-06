@@ -90,6 +90,12 @@ public:
 
 	void clock();
 
+	// What the last fetch produced: the instruction word (a 16-bit or 15-bit
+	// payload sits in the low bits) and its size in bytes (2, or 4 for a 32-bit
+	// instruction, a parallel pair or an invalid word). Read-only, for tests.
+	uint32_t lastInstr() const     { return instr; }
+	uint8_t  lastInstrSize() const { return instrSize; }
+
 private:
 
 	Bus		*bus = nullptr;
