@@ -511,3 +511,102 @@ TEST_F(CPUFixture, Op0UndefinedFuncRaisesReservedInstruction)
     EXPECT_EQ(bus.cpu.cr[2] & spg290::ECR_CODE_MASK, 9u);   // RI
     EXPECT_EQ(bus.cpu.cr[5], 0x100u);
 }
+
+
+// ---- Story 6b: OP 3-7 ----
+TEST_F(CPUFixture, JX16_KeepsUpperPcBitsOfCurrentPage)
+{
+    bus.cpu.pc = 0x00012340;
+    execute16(encodeJX16(0x123, false));        // Disp11 << 1 = 0x246
+    EXPECT_EQ(bus.cpu.pc, 0x00012246u);         // PC[31:12] kept, PC[11:0] replaced
+}
+
+TEST_F(CPUFixture, JL16_LinksCurrentPcPlusTwo)
+{
+    bus.cpu.pc = 0x00012340;
+    execute16(encodeJX16(0x10, true));
+    EXPECT_EQ(getReg(3), 0x00012342u);
+    EXPECT_EQ(bus.cpu.pc, 0x00012020u);
+}
+
+TEST_F(CPUFixture, B16_BackwardToSelfIsFourF00)
+{
+    EXPECT_EQ(encodeB16(15, 0), 0x4F00);
+    bus.cpu.pc = 0x100;
+    execute16(encodeB16(15, 0));                // disp 0 = branch to itself
+    EXPECT_EQ(bus.cpu.pc, 0x100u);
+}
+
+TEST_F(CPUFixture, LDIU16_ZeroExtendsHighBitImmediate)
+{
+    execute16(encodeLDIU16(9, 0xFF));
+    EXPECT_EQ(getReg(9), 0xFFu);
+}
+
+TEST_F(CPUFixture, Op1IsUndefinedAndRaisesReservedInstruction)
+{
+    bus.cpu.pc = 0x100;
+    execute16(0x1000);
+    EXPECT_EQ(bus.cpu.cr[2] & spg290::ECR_CODE_MASK, 9u);
+    EXPECT_EQ(bus.cpu.cr[5], 0x100u);
+}
+
+TEST_F(CPUFixture, ADDEI16_UpdatesFlags)
+{
+    setReg(4, 0xFFFFFFFFu);
+    execute16(encodeADDEI16(4, 0));             // + 1
+    EXPECT_EQ(getReg(4), 0u);
+    EXPECT_EQ(getFlag(spg290::Z), 1);
+    EXPECT_EQ(getFlag(spg290::C), 1);
+}
+
+TEST_F(CPUFixture, SLLI16_CarryIsLastBitOut)
+{
+    setReg(4, 0x80000000u);
+    execute16(encodeSLLI16(4, 1));
+    EXPECT_EQ(getReg(4), 0u);
+    EXPECT_EQ(getFlag(spg290::C), 1);
+    EXPECT_EQ(getFlag(spg290::Z), 1);
+}
+
+TEST_F(CPUFixture, BITCLR_BITSET_BITTGL16_ChangeOneBit)
+{
+    setReg(4, 0xFFu);
+    execute16(encodeBITCLR16(4, 3));
+    EXPECT_EQ(getReg(4), 0xF7u);
+
+    bus.cpu.pc = 0x100;
+    execute16(encodeBITSET16(4, 8));
+    EXPECT_EQ(getReg(4), 0x1F7u);
+
+    bus.cpu.pc = 0x100;
+    execute16(encodeBITTGL16(4, 0));
+    EXPECT_EQ(getReg(4), 0x1F6u);
+}
+
+TEST_F(CPUFixture, LHP16_ScalesByTwoAndSignExtends)
+{
+    setReg(2, 0x200u);
+    bus.write16(0x200 + 2 * 3, 0x8001);
+    execute16(encodeLHP16(5, 3));
+    EXPECT_EQ(getReg(5), 0xFFFF8001u);
+}
+
+TEST_F(CPUFixture, SHP16_And_SBP16_StoreAtBpOffsets)
+{
+    setReg(2, 0x200u);
+    setReg(5, 0x12345678u);
+    execute16(encodeSHP16(5, 2));               // [BP + 4]
+    EXPECT_EQ(bus.read16(0x204), 0x5678u);
+
+    bus.cpu.pc = 0x100;
+    execute16(encodeSBP16(5, 7));               // [BP + 7]
+    EXPECT_EQ(bus.read8(0x207), 0x78u);
+}
+
+TEST_F(CPUFixture, Op7UndefinedFuncRaisesReservedInstruction)
+{
+    bus.cpu.pc = 0x100;
+    execute16(enc16_I1(7, 1, 0, 2));
+    EXPECT_EQ(bus.cpu.cr[2] & spg290::ECR_CODE_MASK, 9u);
+}

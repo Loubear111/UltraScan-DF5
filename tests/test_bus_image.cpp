@@ -274,9 +274,9 @@ TEST(BusImage, LittleEndianFetchAdvancesByTwoForSixteenBitInstructions)
     Bus b(1024u * 1024u);
     b.setLittleEndian(true);
 
-    // nop! = 0x7400 (bytes 00 74); b! AL, disp 0 = 0x71F0 (bytes F0 71),
-    // a branch to itself. Both use the emulator's current 16-bit layout.
-    const uint8_t code[] = { 0x00, 0x74, 0xF0, 0x71 };
+    // nop! = 0x0000 (bytes 00 00); b! AL, disp 0 = 0x4F00 (bytes 00 4F),
+    // a branch to itself.
+    const uint8_t code[] = { 0x00, 0x00, 0x00, 0x4F };
     ASSERT_TRUE(b.loadImage(code, sizeof(code), 0x1000));
 
     b.cpu.pc = 0x1000;

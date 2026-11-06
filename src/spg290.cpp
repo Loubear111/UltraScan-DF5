@@ -1998,14 +1998,13 @@ uint8_t spg290::LSU_UPD()
 }
 
 // ====================================================================
-// 16-bit instruction decoder. See the layout documented in spg290.h.
-// GPR fields address r0..r15; the high bank (r16..r31) is reached via
-// the H bit (pop/push) or the cross-bank moves (mlfh/mhfl).
+// 16-bit instruction decoder (PDF 2.2). The argument is the 15-bit payload
+// in instr[14:0]; bit 15 is the P-bit. OP = bits 14:12. GPR fields address
+// r0..r15; the high bank (r16..r31) is reached through mlfh!/mhfl! and the
+// H bit of push!/pop!. OP 1 and undefined function codes raise RI.
 //
-// Flag notes from the spec: the "!" ALU ops (add/addc/sub/and/or/xor/
-// neg/not) and shifts leave N/Z/C/V undefined, so this model leaves
-// them untouched. cmp! updates N/Z/C/V, bittst! updates N/Z, and
-// t{cond}! sets T from the condition.
+// The "!" ALU forms are CU = 1: the PDF lists their flags as undefined
+// (clobbered); they update the flags the way the 32-bit .c forms do.
 // ====================================================================
 uint8_t spg290::decode16()
 {
@@ -2081,12 +2080,6 @@ uint8_t spg290::decode16()
         }
         break;
     }
-    case 0x1: // ldiu! : rD[11:8] Imm8[7:0]
-    {
-        uint8_t d = (w >> 8) & 0xF;
-        writeReg(d, (uint32_t)(w & 0xFF));
-        break;
-    }
     case 0x2: // OP 2: rD[11:8] rA[7:4] func4[3:0]  (PDF 2.2)
     {
         uint8_t d    = (w >> 8) & 0xF;
@@ -2123,133 +2116,62 @@ uint8_t spg290::decode16()
         }
         break;
     }
-    case 0x3: // bittst! : rD[11:8] BN[7:3]  -> N=rD[31], Z=~rD[BN]
+    case 0x3: // OP 3: j!/jl!  Disp11[11:1] LK[0]
     {
-        uint8_t d  = (w >> 8) & 0xF;
-        uint8_t bn = (w >> 3) & 0x1F;
-        uint32_t vd = regs[d];
-        SetFlag(N, (vd >> 31) & 1);
-        SetFlag(Z, ((vd >> bn) & 1) == 0);
+        uint32_t pcCurrent = pc - instrSize;
+        if (w & 1) writeReg(3, pcCurrent + 2);
+        pc = (pcCurrent & 0xFFFFF000u) | (uint32_t)(w & 0xFFE);
         break;
     }
-    case 0x4: // cross-bank moves : func1[11] rD[7:4] rA[3:0]
+    case 0x4: // OP 4: b{cond}!  EC[11:8] Disp8[7:0]
     {
-        uint8_t func = (w >> 11) & 0x1;
-        uint8_t d    = (w >> 4) & 0xF;
-        uint8_t a    = w & 0xF;
-        if (func == 0) writeReg(d, regs[(uint8_t)(a + 16)]);       // mlfh! rD(lo) = rA(hi)
-        else           writeReg((uint8_t)(d + 16), regs[a]);       // mhfl! rD(hi) = rA(lo)
+        int32_t disp = (int8_t)(w & 0xFF);
+        if (evalCondition((w >> 8) & 0xF))
+            pc = (pc - instrSize) + (uint32_t)(disp << 1);
         break;
     }
-    case 0x5: // mem simple : func3[11:9] rD[8:5] rA[4:1]
+    case 0x5: // OP 5: ldiu!  rD[11:8] Imm8[7:0]
+        writeReg((w >> 8) & 0xF, w & 0xFF);
+        break;
+    case 0x6: // OP 6: rD[11:8] Imm5[7:3] func3[2:0]
     {
-        uint8_t func = (w >> 9) & 0x7;
-        uint8_t d    = (w >> 5) & 0xF;
-        uint8_t a    = (w >> 1) & 0xF;
-        uint32_t addr = regs[a];
-        switch (func)
+        uint8_t d    = (w >> 8) & 0xF;
+        uint8_t imm5 = (w >> 3) & 0x1F;
+        uint32_t vd  = regs[d];
+        switch (w & 0x7)
         {
-        case 0: writeReg(d, readWord(addr));                                   break; // lw!
-        case 1: writeReg(d, (uint32_t)(int32_t)(int16_t)readHalf(addr));       break; // lh!
-        case 2: writeReg(d, readByte(addr));                                   break; // lbu!
-        case 3: writeWord(addr, regs[d]);                                      break; // sw!
-        case 4: writeHalf(addr, (uint16_t)regs[d]);                            break; // sh!
-        case 5: writeByte(addr, (uint8_t)regs[d]);                             break; // sb!
-        default: break;
+        case 0: // addei! / subei!: Imm5[4] selects subtract, value = 1 << Imm5[3:0]
+            if (imm5 & 0x10) sub16(d, vd, 1u << (imm5 & 0xF), true);
+            else             add16(d, vd, 1u << (imm5 & 0xF), 0);
+            break;
+        case 1: shift16(d, vd, imm5, 0); break;                          // slli!
+        case 2: break;                                                    // sdbbp! (no debug probe modelled)
+        case 3: shift16(d, vd, imm5, 1); break;                          // srli!
+        case 4: writeReg(d, vd & ~(1u << imm5)); break;                  // bitclr!
+        case 5: writeReg(d, vd | (1u << imm5)); break;                   // bitset!
+        case 6: SetFlag(N, (vd >> 31) & 1); SetFlag(Z, ((vd >> imm5) & 1) == 0); break; // bittst!
+        case 7: writeReg(d, vd ^ (1u << imm5)); break;                   // bittgl!
         }
         break;
     }
-    case 0x6: // mem BP-relative : func3[11:9] rD[8:5] Imm5[4:0]  (BP = r2)
+    case 0x7: // OP 7: BP (r2) relative  rD[11:8] Imm5[7:3] func3[2:0]
     {
-        uint8_t func = (w >> 9) & 0x7;
-        uint8_t d    = (w >> 5) & 0xF;
-        uint8_t imm5 = w & 0x1F;
+        uint8_t d    = (w >> 8) & 0xF;
+        uint8_t imm5 = (w >> 3) & 0x1F;
         uint32_t bp  = regs[2];
-        switch (func)
+        switch (w & 0x7)
         {
-        case 0: writeReg(d, readWord(bp + (imm5 << 2)));                                       break; // lwp!
-        case 1: writeReg(d, (uint32_t)(int32_t)(int16_t)readHalf(bp + (imm5 << 1)));            break; // lhp!
-        case 2: writeReg(d, readByte(bp + imm5));                                              break; // lbup!
-        case 3: writeWord(bp + (imm5 << 2), regs[d]);                                          break; // swp!
-        case 4: writeHalf(bp + (imm5 << 1), (uint16_t)regs[d]);                                break; // shp!
-        case 5: writeByte(bp + imm5, (uint8_t)regs[d]);                                        break; // sbp!
-        default: break;
+        case 0: writeReg(d, readWord(bp + (imm5 << 2))); break;                                     // lwp!
+        case 1: writeReg(d, (uint32_t)(int32_t)(int16_t)readHalf(bp + (imm5 << 1))); break;          // lhp!
+        case 3: writeReg(d, readByte(bp + imm5)); break;                                            // lbup!
+        case 4: writeWord(bp + (imm5 << 2), regs[d]); break;                                        // swp!
+        case 5: writeHalf(bp + (imm5 << 1), (uint16_t)regs[d]); break;                              // shp!
+        case 7: writeByte(bp + imm5, (uint8_t)regs[d]); break;                                      // sbp!
+        default: raiseException(EXC_RI); break;
         }
         break;
     }
-    case 0x7: // extended group: a lone 16-bit instruction only has 15 usable
-              // payload bits (bit 15 is the P-bit, confirmed in s_core7.pdf),
-              // so the real "main opcode" is just 3 bits (14:12) — leaving no
-              // room for the previous 4-bit op16 scheme's 0x8-0xF groups.
-              // sub[11:8] multiplexes stack/b{cond}!/br{cond}!/jx!/system
-              // into this one slot for now (bit-exact real encodings for
-              // these are deferred to the ISA audit against the spec).
-    {
-        uint8_t sub = (w >> 8) & 0xF;
-        switch (sub)
-        {
-        case 0x0: // stack : func1[7] H[6] rD[5:3] rA[2:0]
-        {
-            uint8_t func = (w >> 7) & 0x1;
-            uint8_t hbit = (w >> 6) & 0x1;
-            uint8_t d    = (w >> 3) & 0x7;
-            uint8_t a    = w & 0x7;
-            uint8_t dreg = hbit ? (uint8_t)(d + 16) : d;
-            uint32_t base = regs[a];
-            if (func == 0) // pop! : load then post-increment by 4
-            {
-                writeReg(dreg, readWord(base));
-                writeReg(a, base + 4);
-            }
-            else           // push! : pre-decrement by 4 then store
-            {
-                writeWord(base - 4, regs[dreg]);
-                writeReg(a, base - 4);
-            }
-            break;
-        }
-        case 0x1: // b{cond}! : cond[7:4] Disp4[3:0]  (halfword-granular, see BCOND)
-        {
-            uint8_t cond = (w >> 4) & 0xF;
-            int32_t disp = (int32_t)(int8_t)((w & 0xF) << 4) >> 4;  // sign-extend 4-bit
-            if (evalCondition(cond))
-                pc = (pc - instrSize) + (uint32_t)(disp << 1);
-            break;
-        }
-        case 0x2: // br{cond}! : cond[7:4] rA[2:0]
-        {
-            uint8_t cond = (w >> 4) & 0xF;
-            uint8_t a    = w & 0x7;
-            if (evalCondition(cond))
-                pc = regs[a];
-            break;
-        }
-        case 0x3: // jx! : LK[7] Disp7[6:0]
-        {
-            uint8_t  lk   = (w >> 7) & 0x1;
-            uint32_t disp = w & 0x7F;
-            if (lk)
-                writeReg(3, pc);      // link register r3 = following instruction
-            uint32_t pcCurrent = pc - instrSize;
-            pc = (pcCurrent & 0xFFFFFF00u) | (disp << 1);
-            break;
-        }
-        case 0x4: // system : func2[7:6] cond[5:2]
-        {
-            uint8_t func = (w >> 6) & 0x3;
-            if (func == 2)             // t{cond}! : T = condition
-            {
-                uint8_t cond = (w >> 2) & 0xF;
-                SetFlag(T, evalCondition(cond));
-            }
-            // func 0 = nop!, func 1 = sdbbp! (debug breakpoint -> no-op here)
-            break;
-        }
-        default: break;
-        }
-        break;
-    }
-    default: break;
+    default: raiseException(EXC_RI); break;   // OP 1 is undefined
     }
 
     return 1;

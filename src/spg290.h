@@ -521,29 +521,20 @@ private:
 	uint8_t LSU_UPD();
 
 	// ============================================================
-	// 16-bit instruction set ("!"-suffixed forms).
+	// 16-bit instruction set ("!"-suffixed forms), S+core7 PDF 2.2.
 	//
-	// A word whose bit 31 is 0 is decoded as a 16-bit instruction
-	// (all 32-bit encoders set bit 31). The 16-bit payload lives in
-	// the low 16 bits, laid out by this emulator's own convention:
+	// Called with the 15-bit payload in instr[14:0] (P-bit 15 = 0). OP = bits 14:12:
+	//   0  rD[11:8] rA[7:4] func4[3:0]  nop! mlfh! mhfl! mv! br{c}! t{c}! sll! addc! srl! sra! brl{c}!
+	//   1  undefined (RI)
+	//   2  rD[11:8] rA[7:4] func4[3:0]  add! sub! neg! cmp! and! or! not! xor! lw! lh! pop! lbu! sw! sh! push! sb!
+	//   3  Disp11[11:1] LK[0]           j! / jl!
+	//   4  EC[11:8] Disp8[7:0]          b{cond}!
+	//   5  rD[11:8] Imm8[7:0]           ldiu!
+	//   6  rD[11:8] Imm5[7:3] func3     addei!/subei! slli! sdbbp! srli! bitclr! bitset! bittst! bittgl!
+	//   7  rD[11:8] Imm5[7:3] func3     BP (r2) relative: lwp! lhp! lbup! swp! shp! sbp!
 	//
-	//   op16 = bits 15:12 selects the format/group:
-	//     0x0 RR-ALU : func4[11:8] rD[7:4] rA[3:0]
-	//     0x1 ldiu   : rD[11:8] Imm8[7:0]
-	//     0x2 R-Imm  : func2[11:10] rD[9:6] Imm[5:0]   (slli/srli/addei/subei)
-	//     0x3 bittst : rD[11:8] BN[7:3]
-	//     0x4 xbank  : func1[11] rD[7:4] rA[3:0]        (mlfh/mhfl)
-	//     0x5 mem    : func3[11:9] rD[8:5] rA[4:1]      (lw/lh/lbu/sw/sh/sb)
-	//     0x6 mem-bp : func3[11:9] rD[8:5] Imm5[4:0]    (lwp/lhp/lbup/swp/shp/sbp, BP=r2)
-	//     0x7 stack  : func1[11] H[10] rD[9:6] rA[5:2]  (pop/push)
-	//     0x8 bcond  : cond[11:8] Disp8[7:0]
-	//     0x9 brcond : cond[11:8] rA[7:4]
-	//     0xA jx     : LK[11] Disp11[10:0]
-	//     0xB system : func2[11:10] cond[9:6]           (nop/sdbbp/t{cond})
-	//
-	// 16-bit GPR fields address r0..r15; the high bank (r16..r31) is
-	// reached through the H bit (stack) or the xbank moves.
-	// ============================================================
+	// 16-bit GPR fields address r0..r15; push!/pop! use rDgh (H = bit 7 selects
+	// r16..r31) and an r0..r7 base in bits 6:4.
 	uint8_t decode16();
 
 	// --- System / coprocessor register moves (OP_SYS dispatcher) ---
