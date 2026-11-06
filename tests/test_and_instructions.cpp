@@ -76,7 +76,7 @@ TEST_F(CPUFixture, ANDX_KnownGoodInstructionWord)
 {
     setReg(10, 0xFFFF45E6u); // A register (from main.cpp)
     setReg(11, 0b0010u);     // B register
-    execute(0x818A2C20u);    // ANDX D=12, A=10, B=11, CU=0
+    execute(0x818AAC20u);    // ANDX D=12, A=10, B=11, CU=0
     EXPECT_EQ(getReg(12), 0xFFFF45E6u & 0b0010u);
 }
 
@@ -122,7 +122,7 @@ TEST_F(CPUFixture, ANDIX_NoCU_FlagsUntouched)
 TEST_F(CPUFixture, ANDIX_KnownGoodInstructionWord)
 {
     setReg(12, 0xFFFFFFFFu);
-    execute(0x85937FFEu); // ANDIX D=12, imm=0xFFFF, CU=0
+    execute(0x8593FFFEu); // ANDIX D=12, imm=0xFFFF, CU=0
     EXPECT_EQ(getReg(12), 0x0000FFFFu);
 }
 
@@ -166,7 +166,7 @@ TEST_F(CPUFixture, ANDRIX_NoCU_FlagsUntouched)
 TEST_F(CPUFixture, ANDRIX_KnownGoodInstructionWord)
 {
     setReg(10, 0xFFFF45E6u); // A register (from main.cpp)
-    execute(0xB18A469Cu);    // ANDRIX D=12, A=10, imm=0x234E, CU=0
+    execute(0xB18AC69Cu);    // ANDRIX D=12, A=10, imm=0x234E, CU=0
     EXPECT_EQ(getReg(12), 0xFFFF45E6u & 0x234Eu);
 }
 

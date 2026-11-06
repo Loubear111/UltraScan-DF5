@@ -387,17 +387,22 @@ TEST_F(CPUFixture, TCOND16_ClearsWhenConditionFails)
 // ============================================================
 TEST_F(CPUFixture, MixedWidthInstructions_FetchAdvancesByRealSize)
 {
+    // 32-bit instructions are word-aligned: add! and nop! share the first word.
     setReg(4, 10u);
     setReg(5, 5u);
-    bus.write16(0, (uint16_t)(encodeADD16(4, 5) >> 16));   // add! r4, r5 (2 bytes @ 0)
-    bus.write32(2, encodeADDIX(6, 1, false));              // addi r6, 1 (4 bytes @ 2)
+    bus.write16(0, encodeADD16(4, 5));                     // add! r4, r5 (2 bytes @ 0)
+    bus.write16(2, encodeNOP16());                         // nop!        (2 bytes @ 2)
+    bus.write32(4, encodeADDIX(6, 1, false));              // addi r6, 1  (4 bytes @ 4)
 
     bus.cpu.clock();                 // executes the 16-bit add!
     EXPECT_EQ(bus.cpu.pc, 2u);
     EXPECT_EQ(getReg(4), 15u);
 
+    bus.cpu.clock();                 // executes the 16-bit nop!
+    EXPECT_EQ(bus.cpu.pc, 4u);
+
     bus.cpu.clock();                 // executes the 32-bit addi
-    EXPECT_EQ(bus.cpu.pc, 6u);
+    EXPECT_EQ(bus.cpu.pc, 8u);
     EXPECT_EQ(getReg(6), 1u);
 }
 

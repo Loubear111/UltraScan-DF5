@@ -147,41 +147,6 @@ TEST_F(CPUFixture, SystemNoOps_AdvanceWithoutSideEffects)
     execute(encodeCACHE());
     execute(encodePFLUSH());
     execute(encodeSDBBP32());
-    execute(encodeCEINST());
     EXPECT_EQ(getFlag(spg290::C), 1u);
 }
 
-// ---- ldcx / stcx ----
-TEST_F(CPUFixture, LDCX_LoadsCoprocessorDataFromMemory)
-{
-    setReg(5, 100);                   // base r5 = 100
-    setMem(104,  0xDEADBEEFu);         // memory at 100 + 4
-    execute(encodeLDCX(5, 8, 2, 4));  // ldc2 cr8, [r5, 4]
-    EXPECT_EQ(bus.cpu.copData[2][8], 0xDEADBEEFu);
-}
-
-TEST_F(CPUFixture, LDCX_NegativeOffset)
-{
-    setReg(5, 100);
-    setMem(96,  0x12345678u);          // memory at 100 - 4
-    execute(encodeLDCX(5, 3, 1, -4));
-    EXPECT_EQ(bus.cpu.copData[1][3], 0x12345678u);
-}
-
-TEST_F(CPUFixture, STCX_StoresCoprocessorDataToMemory)
-{
-    setReg(5, 100);
-    bus.cpu.copData[3][9] = 0xCAFEBABEu;
-    execute(encodeSTCX(5, 9, 3, 8));  // stc3 cr9, [r5, 8]
-    EXPECT_EQ(getMem(108), 0xCAFEBABEu);
-}
-
-TEST_F(CPUFixture, STCX_then_LDCX_RoundTrip)
-{
-    setReg(6, 50);
-    bus.cpu.copData[2][4] = 0x0BADF00Du;
-    execute(encodeSTCX(6, 4, 2, 2));  // mem[52] = cr4
-    bus.cpu.copData[2][4] = 0;        // clear to prove the reload works
-    execute(encodeLDCX(6, 4, 2, 2));  // cr4 = mem[52]
-    EXPECT_EQ(bus.cpu.copData[2][4], 0x0BADF00Du);
-}

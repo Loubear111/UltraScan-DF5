@@ -33,11 +33,11 @@ TEST_F(CPUFixture, BCONDL_AlwaysBranches)
 
 TEST_F(CPUFixture, BCONDL_NegativeDisplacement)
 {
-    bus.cpu.pc = 10;
+    bus.cpu.pc = 12;
     bus.cpu.status |= spg290::Z;
-    execute(encodeBCONDL(4, -5));         // beql -5 halfwords -> 10 - 10
+    execute(encodeBCONDL(4, -6));         // beql -6 halfwords -> 12 - 12
     EXPECT_EQ(bus.cpu.pc, 0u);
-    EXPECT_EQ(getReg(3), 14u);            // following instruction was at byte 14
+    EXPECT_EQ(getReg(3), 16u);            // following instruction was at byte 16
 }
 
 // --- BR{cond}L : conditional branch to register and link  (opcode 0x1E) ---

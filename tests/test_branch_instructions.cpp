@@ -32,9 +32,9 @@ TEST_F(CPUFixture, BCOND_AlwaysBranches)
 
 TEST_F(CPUFixture, BCOND_NegativeDisplacement)
 {
-    bus.cpu.pc = 10;                      // place the branch at byte 10
+    bus.cpu.pc = 12;                      // place the branch at byte 12
     bus.cpu.status |= spg290::Z;
-    execute(encodeBCOND(4, -5));          // beq -5 halfwords -> 10 - 10
+    execute(encodeBCOND(4, -6));          // beq -6 halfwords -> 12 - 12
     EXPECT_EQ(bus.cpu.pc, 0u);
 }
 

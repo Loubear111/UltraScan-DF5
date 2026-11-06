@@ -52,57 +52,13 @@ TEST_F(CPUFixture, ORRIX_Basic)
 // SUBIX  —  d = d - sext(imm16)   (I-type-2, func3=1)
 // ============================================================
 
-TEST_F(CPUFixture, SUBIX_Basic)
-{
-    setReg(4, 100u);
-    execute(encodeSUBIX(4, 30u, false));
-    EXPECT_EQ(getReg(4), 70u);
-}
-
-TEST_F(CPUFixture, SUBIX_NegativeImmediateAddsBack)
-{
-    setReg(4, 100u);
-    execute(encodeSUBIX(4, 0xFFFFu, false)); // imm = -1 -> 100 - (-1) = 101
-    EXPECT_EQ(getReg(4), 101u);
-}
-
-TEST_F(CPUFixture, SUBIX_Zero_CUSet)
-{
-    setReg(4, 50u);
-    execute(encodeSUBIX(4, 50u, true));
-    EXPECT_EQ(getReg(4), 0u);
-    EXPECT_EQ(getFlag(spg290::Z), 1);
-    EXPECT_EQ(getFlag(spg290::C), 1);
-}
-
 // ============================================================
 // SUBISX  —  d = d - (sext(imm16) << 16)   (I-type-2, func3=2)
 // ============================================================
 
-TEST_F(CPUFixture, SUBISX_Basic)
-{
-    setReg(4, 0x00050000u);
-    execute(encodeSUBISX(4, 0x0001u, false));
-    EXPECT_EQ(getReg(4), 0x00040000u);
-}
-
 // ============================================================
 // SUBRIX  —  d = a - sext(imm14)   (RIX-type, opcode 0x0F)
 // ============================================================
-
-TEST_F(CPUFixture, SUBRIX_Basic)
-{
-    setReg(5, 100u);
-    execute(encodeSUBRIX(4, 5, 10u, false));
-    EXPECT_EQ(getReg(4), 90u);
-}
-
-TEST_F(CPUFixture, SUBRIX_NegativeImmediate)
-{
-    setReg(5, 100u);
-    execute(encodeSUBRIX(4, 5, 0x3FFFu, false)); // imm14 = -1 -> 100 - (-1) = 101
-    EXPECT_EQ(getReg(4), 101u);
-}
 
 // ============================================================
 // CMPI  —  compare d - sext(imm16); sets N/Z/C/V/T  (I-type-1, func3=2)

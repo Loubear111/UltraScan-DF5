@@ -84,22 +84,6 @@ TEST_F(CPUFixture, DIVU_Basic)
 }
 
 // --- REM / REMU : rD = remainder   (func6=0x0A / 0x0B) ---
-TEST_F(CPUFixture, REM_Basic)
-{
-    setReg(5, 17u);
-    setReg(6, 5u);
-    execute(encodeREM(7, 5, 6));
-    EXPECT_EQ(getReg(7), 2u);
-}
-
-TEST_F(CPUFixture, REMU_Basic)
-{
-    setReg(5, 17u);
-    setReg(6, 5u);
-    execute(encodeREMU(7, 5, 6));
-    EXPECT_EQ(getReg(7), 2u);
-}
-
 // --- MFCEL / MFCEH : move CE register to GPR ---
 TEST_F(CPUFixture, MFCEL_MovesQuotient)
 {

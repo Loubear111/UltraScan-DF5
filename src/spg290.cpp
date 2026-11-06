@@ -134,56 +134,60 @@ void spg290::clock()
 			uint8_t func6 = (instr & func6_MASK) >> 1;
 			switch (func6)
 			{
-			case F6_NOP:     NOP();     break;
-			case F6_ADDX:    ADDX();    break;
-			case F6_ADDCX:   ADDCX();   break;
-			case F6_SUBX:    SUBX();    break;
-			case F6_SUBCX:   SUBCX();   break;
-			case F6_NEGX:    NEGX();    break;
-			case F6_CMP:     CMP();     break;
-			case F6_CMPZ:    CMPZ();    break;
-			case F6_MVCOND:  MVCOND();  break;
-			// case F6_MTCEH: — merged into F6_MTCEL case (same func6=0x25)
-			case F6_REM:     REM();     break;
-			case F6_REMU:    REMU();    break;
-			case F6_ANDX:    ANDX();    break;
-			case F6_ORX:     ORX();     break;
-			case F6_XORX:    XORX();    break;
-			case F6_NOTX:    NOTX();    break;
-			case F6_BITTSTC: BITTSTC(); break;
-			case F6_ROLC:    ROLC();    break;
-			case F6_ROLIC:   ROLIC();   break;
-			case F6_RORC:    RORC();    break;
-			case F6_RORIC:   RORIC();   break;
-			case F6_ADDS:    ADDS();    break;
-			case F6_SUBS:    SUBS();    break;
-			case F6_ABSS:    ABSS();    break;
-			case F6_SLLS:    SLLS();    break;
-			case F6_MSBF:    MSBF();    break;
-			case F6_SLLX:    SLLX();    break;
-			case F6_SRLX:    SRLX();    break;
-			case F6_SRAX:    SRAX();    break;
-			case F6_ROLX:    ROLX();    break;
-			case F6_RORX:    RORX();    break;
-			case F6_SLLIX:   SLLIX();   break;
-			case F6_SRLIX:   SRLIX();   break;
-			case F6_SRAIX:   SRAIX();   break;
-			case F6_ROLIX:   ROLIX();   break;
-			case F6_RORIX:   RORIX();   break;
-			case F6_EXTSBX:  EXTSBX();  break;
-			case F6_EXTSHX:  EXTSHX();  break;
-			case F6_EXTZBX:  EXTZBX();  break;
-			case F6_EXTZHX:  EXTZHX();  break;
-			case F6_CLZ:     CLZ();     break;
-			case F6_ABS:     ABS();     break;
-			case F6_MIN:     MIN();     break;
-			case F6_MAX:     MAX();     break;
-			case F6_BITREV:  BITREV();  break;
-			case F6_MUL:     MUL();     break;
-			case F6_MULU:    MULU();    break;
-			case F6_DIV:     DIV();     break;
-			case F6_DIVU:    DIVU();    break;
-			case F6_MFCEL:  // 0x24: covers mfcel/mfceh/mfcehl (rB=1/2/3)
+			case F6_NOP:        NOP();       break;
+			case F6_SDBBP:    break;             // sdbbp: no debug probe modelled
+			case F6_PFLUSH:   break;             // pflush: no-op
+			case F6_SYSCALL:    SYSCALL();   break;
+			case F6_TRAPCOND:   TRAPCOND();  break;
+			case F6_BRCOND:     BR();        break;
+			case F6_ADDX:       ADDX();      break;
+			case F6_ADDCX:      ADDCX();     break;
+			case F6_SUBX:       SUBX();      break;
+			case F6_SUBCX:      SUBCX();     break;
+			case F6_CMP:        CMP();       break;
+			case F6_CMPZ:       CMPZ();      break;
+			case F6_NEGX:       NEGX();      break;
+			case F6_ANDX:       ANDX();      break;
+			case F6_ORX:        ORX();       break;
+			case F6_NOTX:       NOTX();      break;
+			case F6_XORX:       XORX();      break;
+			case F6_BITCLR:     BITCLR();    break;
+			case F6_BITSET:     BITSET();    break;
+			case F6_BITTST:     BITTSTC();   break;
+			case F6_BITTGL:     BITTGL();    break;
+			case F6_SLLX:       SLLX();      break;
+			case F6_SRLX:       SRLX();      break;
+			case F6_SRAX:       SRAX();      break;
+			case F6_RORX:       RORX();      break;
+			case F6_RORC:       RORC();      break;
+			case F6_ROLX:       ROLX();      break;
+			case F6_ROLC:       ROLC();      break;
+			case F6_MUL:        MUL();       break;
+			case F6_MULU:       MULU();      break;
+			case F6_DIV:        DIV();       break;
+			case F6_DIVU:       DIVU();      break;
+			case F6_MFSR:       MFSR();      break;
+			case F6_MTSR:       MTSR();      break;
+			case F6_TCOND:      TCOND();     break;
+			case F6_MVCOND:     MVCOND();    break;
+			case F6_EXTSBX:     EXTSBX();    break;
+			case F6_EXTSHX:     EXTSHX();    break;
+			case F6_EXTZBX:     EXTZBX();    break;
+			case F6_EXTZHX:     EXTZHX();    break;
+			case F6_LCB:        LCB();       break;
+			case F6_LCW:        LCW();       break;
+			case F6_LCE:        LCE();       break;
+			case F6_SCB:        SCB();       break;
+			case F6_SCW:        SCW();       break;
+			case F6_SCE:        SCE();       break;
+			case F6_SLLIX:      SLLIX();     break;
+			case F6_SRLIX:      SRLIX();     break;
+			case F6_SRAIX:      SRAIX();     break;
+			case F6_RORIX:      RORIX();     break;
+			case F6_RORIC:      RORIC();     break;
+			case F6_ROLIX:      ROLIX();     break;
+			case F6_ROLIC:      ROLIC();     break;
+			case F6_MFCE:  // mfcel/mfceh/mfcehl selected by rB (1/2/3)
 				if (((instr & 0x7C00) >> 10) == 2) MFCEH();
 				else if (((instr & 0x7C00) >> 10) == 3)
 				{
@@ -194,8 +198,7 @@ void spg290::clock()
 				}
 				else MFCEL();
 				break;
-			// case F6_MFCEH: — same value as F6_MFCEL; handled above.
-			case F6_MTCEL:  // 0x25: covers mtcel/mtceh/mtcehl (rB=1/2/3)
+			case F6_MTCE:  // mtcel/mtceh/mtcehl selected by rB (1/2/3)
 				if (((instr & 0x7C00) >> 10) == 2) MTCEH();
 				else if (((instr & 0x7C00) >> 10) == 3)
 				{
@@ -206,21 +209,7 @@ void spg290::clock()
 				}
 				else MTCEL();
 				break;
-			// case F6_MTCEH: — same value as F6_MTCEL; handled above.
-			case F6_MAD:     MAD();     break;
-			case F6_MADU:    MADU();    break;
-			case F6_MSB:     MSB();     break;
-			case F6_MSBU:    MSBU();    break;  // 0x32 (was 0x0F, moved to avoid conflict)
-			case F6_MULF:    MULF();    break;
-			case F6_MADF:    MADF();    break;
-			// Confirmed via score-elf-as: these are ordinary R-type instructions,
-			// not OP_SYS sub-ops (the OP_SYS=0x1F dispatch for them is kept but is
-			// now dead code from a real-ROM's perspective; see spg290.h).
-			case F6_SYSCALL: SYSCALL();   break;
-			case F6_TRAPCOND:TRAPCOND();  break;
-			case F6_MFSR:    MFSR();      break;
-			case F6_MTSR:    MTSR();      break;
-			default: break;
+			default: raiseException(EXC_RI); break;   // 06 07 0E 19 26 27 32 36 39
 			}
 			break;
 		}
@@ -244,22 +233,11 @@ void spg290::clock()
 			switch (func3)
 			{
 			case F3_ADDISX: ADDISX(); break;  // addis: func3=0
+			case F3_CMPISX: CMPIS();  break;  // cmpis: func3=2
 			case F3_ANDISX: ANDISX(); break;  // andis: func3=4
 			case F3_ORISX:  ORISX();  break;  // oris:  func3=5
 			case F3_LDISX:  LDIS();   break;  // ldis:  func3=6, confirmed via score-elf-as
-			default: break;
-			}
-			break;
-		}
-		case OP_ITYPE2:
-		{
-			uint8_t func3 = (instr & func3_MASK) >> 18;
-			switch (func3)
-			{
-			case F3_LDIS:   LDIS();   break;
-			case F3_SUBIX:  SUBIX();  break;
-			case F3_SUBISX: SUBISX(); break;
-			default: break;
+			default: raiseException(EXC_RI); break;
 			}
 			break;
 		}
@@ -267,7 +245,6 @@ void spg290::clock()
 		case OP_CRFORM: CRFORM(); break;
 		case OP_ADDRIX: ADDRIX(); break;
 		case OP_ORRIX:  ORRIX();  break;
-		case OP_SUBRIX: SUBRIX(); break;
 		case OP_LW:     LW();     break;
 		case OP_SW:     SW();     break;
 		case OP_LBU:    LBU();    break;
@@ -279,12 +256,10 @@ void spg290::clock()
 		// b{cond} and b{cond}l share one opcode; CU bit (LK) selects the link form.
 		case OP_BCOND:  if (instr & CU_MASK) BCONDL(); else BCOND(); break;
 		case OP_JX:     JX();     break;
-		case OP_BR:     BR();     break;
-		case OP_BRL:    BRL();    break;
-		case OP_LSU_UPD:LSU_UPD();break;
-		case OP_HWMAC:  HWMAC();  break;
-		case OP_SYS:    SYS();    break;
-		default: break;
+		case OP_RIX_PRE:  RIX(true);  break;   // pre-index:  rA += imm12, then access [rA]
+		case OP_RIX_POST: RIX(false); break;   // post-index: access [rA], then rA += imm12
+		case OP_CACHE:    break;               // cache: no-op
+		default: raiseException(EXC_RI); break; // 0x1C (custom engine), coprocessor forms and the rest
 		}
 
 		// Just setting cycle per instruction to 1 for all instructions for now
@@ -608,60 +583,6 @@ uint8_t spg290::BITTSTC()
     return 1; // Execution cycle count
 }
 
-uint8_t spg290::CEINST() {
-    //THIS METHOD IS ALL WRONG BUT MAY BE ABLE TO USE OUTLINE
-    uint32_t a = 0, b = 0, result = 0;
-    uint8_t func5, usd1, rA_reg, rB_reg, usd2, dest_reg;
-
-    // Extract fields from the instruction word
-    func5 = (instr & 0x3E000000) >> 25; // func5: bits 29-25 (operation code)
-    usd1   = (instr & 0x1F00000)  >> 20; // USD1:  bits 24-20
-    rA_reg = (instr & 0xF8000)    >> 15; // rA:    bits 19-15
-    rB_reg = (instr & 0x7C00)     >> 10; // rB:    bits 14-10
-    usd2   = (instr & 0x3E0)      >> 5;  // USD2:  bits 9-5
-
-    // Check if custom engine supports this func5 operation
-    //if (!IsCustomOpSupported(func5)) {
-    //    throw RI_Exception(); // Reserved instruction exception
-    //    return 0;
-    //}
-
-    // Fetch source operands if required by the operation
-    //if (OperationUsesSourceA(func5))
-    //    a = read(rA_reg);
-    //if (OperationUsesSourceB(func5))
-    //    b = read(rB_reg);
-
-    // Execute custom operation based on func5
-    //switch (func5) {
-        // Example operation: ADD with USD1 as destination
-        //case CE_ADD:
-        //    result = a + b;
-        //    dest_reg = usd1;
-        //    break;
-        // Example operation: AND with immediate USD2 and store in USD1
-        //case CE_ANDI:
-        //    result = a & usd2;
-        //    dest_reg = usd1;
-        //    break;
-        // Handle other custom operations...
-        //default:
-        //    throw CeE_Exception(); // Custom engine execution exception
-        //    return 0;
-    //}
-
-    // Write result to destination (could be USD1, USD2, or another reg)
-    writeReg(dest_reg, result);
-
-    // Conditionally update flags if CU_MASK is set (optional)
-    if (instr & CU_MASK) {
-        SetFlag(Z, result == 0);
-        SetFlag(N, result >> 31);
-    }
-
-    return 1; // Execution successful
-}
-
 
 uint8_t spg290::ORX()
 {
@@ -883,6 +804,7 @@ uint8_t spg290::CMP()
 
     if (tcs == 0)      SetFlag(T, GetFlag(Z));
     else if (tcs == 1) SetFlag(T, GetFlag(N));
+    else if (tcs == 2) SetFlag(T, true);       // TCS 10: set T unconditionally
 
     return 1;
 }
@@ -901,7 +823,56 @@ uint8_t spg290::CMPZ()
 
     if (tcs == 0)      SetFlag(T, GetFlag(Z));
     else if (tcs == 1) SetFlag(T, GetFlag(N));
+    else if (tcs == 2) SetFlag(T, true);       // TCS 10: set T unconditionally
 
+    return 1;
+}
+
+// br{cond}[l]: special-form func6 0x04. EC = rB field (14:10), target = rA,
+// LK = raw bit 0. The link (r3 = next PC) is written whether or not the
+// branch is taken.
+uint8_t spg290::BR()
+{
+    uint8_t ec    = (instr >> 10) & 0xF;
+    uint8_t a_reg = (instr & 0x1F0000) >> 16;
+    uint32_t target = regs[a_reg];
+
+    if (instr & CU_MASK)
+        writeReg(3, pc);
+
+    if (evalCondition(ec))
+        pc = target;
+    return 1;
+}
+
+// t{cond}: T = condition (EC in the rB field, 14:10).
+uint8_t spg290::TCOND()
+{
+    uint8_t ec = (instr >> 10) & 0xF;
+    SetFlag(T, evalCondition(ec));
+    return 1;
+}
+
+// bitclr / bitset / bittgl rA, BN: rA is both source and destination and BN is
+// the rB field. The .c form sets N and Z from the result. (The PDF only
+// documents bittst.c; the flag effect of the other three is an assumption.)
+uint8_t spg290::BITCLR() { return bitOp(0); }
+uint8_t spg290::BITSET() { return bitOp(1); }
+uint8_t spg290::BITTGL() { return bitOp(2); }
+uint8_t spg290::bitOp(int kind)
+{
+    uint8_t a_reg = (instr & 0x1F0000) >> 16;
+    uint8_t bn    = (instr & 0x7C00) >> 10;
+    uint32_t mask = 1u << bn;
+    uint32_t r    = regs[a_reg];
+    r = (kind == 0) ? (r & ~mask) : (kind == 1) ? (r | mask) : (r ^ mask);
+
+    if (instr & CU_MASK)
+    {
+        SetFlag(N, (r >> 31) & 1);
+        SetFlag(Z, r == 0);
+    }
+    writeReg(a_reg, r);
     return 1;
 }
 
@@ -913,6 +884,24 @@ uint8_t spg290::MVCOND()
 
     if (evalCondition(ec))
         writeReg(d_reg, regs[a_reg]);
+
+    return 1;
+}
+
+// cmpis rD, imm16: compare rD with imm16 << 16 (flags as cmpi).
+uint8_t spg290::CMPIS()
+{
+    uint8_t  d_reg = (instr & 0x3E00000) >> 21;
+    uint32_t imm16 = ((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1);
+    uint32_t a = regs[d_reg];
+    uint32_t b = imm16 << 16;
+    uint32_t r = a - b;
+
+    SetFlag(N, (r >> 31) & 1);
+    SetFlag(Z, r == 0);
+    SetFlag(C, a >= b);
+    SetFlag(V, (((a ^ b) & (a ^ r)) >> 31) & 1);
+    SetFlag(T, GetFlag(Z));
 
     return 1;
 }
@@ -960,68 +949,6 @@ uint8_t spg290::ORRIX()
     {
         SetFlag(N, (r >> 31) & 1);
         SetFlag(Z, r == 0);
-    }
-
-    writeReg(d_reg, r);
-    return 1;
-}
-
-uint8_t spg290::SUBIX()
-{
-    uint8_t  d_reg = (instr & 0x3E00000) >> 21;
-    int32_t  imm   = (int16_t)(((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1));   // sign-extended
-    uint32_t a = regs[d_reg];
-    uint32_t b = (uint32_t)imm;
-    uint32_t r = a - b;
-
-    if (instr & CU_MASK)
-    {
-        SetFlag(N, (r >> 31) & 1);
-        SetFlag(Z, r == 0);
-        SetFlag(C, a >= b);
-        SetFlag(V, (((a ^ b) & (a ^ r)) >> 31) & 1);
-    }
-
-    writeReg(d_reg, r);
-    return 1;
-}
-
-uint8_t spg290::SUBISX()
-{
-    uint8_t  d_reg = (instr & 0x3E00000) >> 21;
-    int32_t  imm   = (int16_t)(((instr & 0x30000) >> 2) | ((instr & 0x7FFE) >> 1));
-    uint32_t a = regs[d_reg];
-    uint32_t b = ((uint32_t)imm) << 16;
-    uint32_t r = a - b;
-
-    if (instr & CU_MASK)
-    {
-        SetFlag(N, (r >> 31) & 1);
-        SetFlag(Z, r == 0);
-        SetFlag(C, a >= b);
-        SetFlag(V, (((a ^ b) & (a ^ r)) >> 31) & 1);
-    }
-
-    writeReg(d_reg, r);
-    return 1;
-}
-
-uint8_t spg290::SUBRIX()
-{
-    uint8_t  d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t  a_reg = (instr & 0x1F0000) >> 16;
-    int32_t  imm14 = (instr >> 1) & 0x3FFF;
-    imm14 = (imm14 << 18) >> 18;                 // sign-extend 14-bit
-    uint32_t a = regs[a_reg];
-    uint32_t b = (uint32_t)imm14;
-    uint32_t r = a - b;
-
-    if (instr & CU_MASK)
-    {
-        SetFlag(N, (r >> 31) & 1);
-        SetFlag(Z, r == 0);
-        SetFlag(C, a >= b);
-        SetFlag(V, (((a ^ b) & (a ^ r)) >> 31) & 1);
     }
 
     writeReg(d_reg, r);
@@ -1308,69 +1235,6 @@ uint8_t spg290::EXTZHX()
     return 1;
 }
 
-uint8_t spg290::CLZ()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint32_t a = regs[a_reg];
-    uint32_t r = (a == 0) ? 32u : (uint32_t)__builtin_clz(a);
-    writeReg(d_reg, r);
-    return 1;
-}
-
-uint8_t spg290::ABS()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint32_t av = regs[a_reg];
-    // Use unsigned negation to avoid signed overflow UB on INT_MIN.
-    uint32_t r = ((int32_t)av >= 0) ? av : (0u - av);
-    writeReg(d_reg, r);
-    return 1;
-}
-
-uint8_t spg290::MIN()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int32_t a = (int32_t)regs[a_reg];
-    int32_t b = (int32_t)regs[b_reg];
-    writeReg(d_reg, (uint32_t)(a <= b ? a : b));
-    return 1;
-}
-
-uint8_t spg290::MAX()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int32_t a = (int32_t)regs[a_reg];
-    int32_t b = (int32_t)regs[b_reg];
-    writeReg(d_reg, (uint32_t)(a >= b ? a : b));
-    return 1;
-}
-
-uint8_t spg290::BITREV()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-
-    uint32_t a = regs[a_reg];
-    // Shift amount: 0 if rB is r0, else low 5 bits of rB.
-    uint8_t sa = (b_reg == 0) ? 0 : (regs[b_reg] & 0x1F);
-
-    // Reverse all 32 bits of rA.
-    uint32_t rev = 0;
-    for (int i = 0; i < 32; ++i)
-        rev |= ((a >> i) & 1u) << (31 - i);
-
-    uint32_t r = (sa == 0) ? rev : (rev >> sa);
-    writeReg(d_reg, r);
-    return 1;
-}
-
 // ---- Custom engine: multiply / divide / moves ----------------------
 
 uint8_t spg290::MUL()
@@ -1421,38 +1285,6 @@ uint8_t spg290::DIVU()
     return 1;
 }
 
-uint8_t spg290::REM()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int32_t a = (int32_t)regs[a_reg];
-    int32_t b = (int32_t)regs[b_reg];
-    if (b != 0)
-    {
-        cel = (uint32_t)(a / b);
-        ceh = (uint32_t)(a % b);
-    }
-    writeReg(d_reg, ceh);   // rem == div then mfceh
-    return 1;
-}
-
-uint8_t spg290::REMU()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint32_t a = regs[a_reg];
-    uint32_t b = regs[b_reg];
-    if (b != 0)
-    {
-        cel = a / b;
-        ceh = a % b;
-    }
-    writeReg(d_reg, ceh);
-    return 1;
-}
-
 uint8_t spg290::MFCEL()
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;   // destination GPR
@@ -1469,89 +1301,15 @@ uint8_t spg290::MFCEH()
 
 uint8_t spg290::MTCEL()
 {
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;    // source GPR
-    cel = regs[a_reg];
+    uint8_t d_reg = (instr & 0x3E00000) >> 21;   // source GPR (rD field)
+    cel = regs[d_reg];
     return 1;
 }
 
 uint8_t spg290::MTCEH()
 {
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    ceh = regs[a_reg];
-    return 1;
-}
-
-// ---- Custom engine: multiply-accumulate ----------------------------
-
-// Helper: current {CEH,CEL} as a single 64-bit accumulator.
-static inline uint64_t packCE(uint32_t ceh, uint32_t cel)
-{
-    return ((uint64_t)ceh << 32) | (uint64_t)cel;
-}
-
-uint8_t spg290::MAD()
-{
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t prod = (int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg];
-    uint64_t acc = packCE(ceh, cel) + (uint64_t)prod;
-    cel = (uint32_t)(acc & 0xFFFFFFFF);
-    ceh = (uint32_t)(acc >> 32);
-    return 1;
-}
-
-uint8_t spg290::MADU()
-{
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint64_t prod = (uint64_t)regs[a_reg] * (uint64_t)regs[b_reg];
-    uint64_t acc = packCE(ceh, cel) + prod;
-    cel = (uint32_t)(acc & 0xFFFFFFFF);
-    ceh = (uint32_t)(acc >> 32);
-    return 1;
-}
-
-uint8_t spg290::MSB()
-{
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t prod = (int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg];
-    uint64_t acc = packCE(ceh, cel) - (uint64_t)prod;
-    cel = (uint32_t)(acc & 0xFFFFFFFF);
-    ceh = (uint32_t)(acc >> 32);
-    return 1;
-}
-
-uint8_t spg290::MSBU()
-{
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    uint64_t prod = (uint64_t)regs[a_reg] * (uint64_t)regs[b_reg];
-    uint64_t acc = packCE(ceh, cel) - prod;
-    cel = (uint32_t)(acc & 0xFFFFFFFF);
-    ceh = (uint32_t)(acc >> 32);
-    return 1;
-}
-
-uint8_t spg290::MULF()
-{
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    // Signed-fractional: the Q31*Q31 product is left-shifted by 1.
-    int64_t prod = ((int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg]) << 1;
-    cel = (uint32_t)((uint64_t)prod & 0xFFFFFFFF);
-    ceh = (uint32_t)((uint64_t)prod >> 32);
-    return 1;
-}
-
-uint8_t spg290::MADF()
-{
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t prod = ((int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg]) << 1;
-    uint64_t acc = packCE(ceh, cel) + (uint64_t)prod;
-    cel = (uint32_t)(acc & 0xFFFFFFFF);
-    ceh = (uint32_t)(acc >> 32);
+    uint8_t d_reg = (instr & 0x3E00000) >> 21;   // source GPR (rD field)
+    ceh = regs[d_reg];
     return 1;
 }
 
@@ -1691,17 +1449,6 @@ uint8_t spg290::JX()
     return 1;
 }
 
-uint8_t spg290::BR()
-{
-    uint8_t bc    = (instr >> 22) & 0xF;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-
-    if (evalCondition(bc))
-        pc = regs[a_reg];
-
-    return 1;
-}
-
 uint8_t spg290::BCONDL()
 {
     uint8_t bc   = (instr >> 10) & 0xF;
@@ -1713,19 +1460,6 @@ uint8_t spg290::BCONDL()
 
     if (evalCondition(bc))
         pc = (pc - instrSize) + (uint32_t)(disp << 1);
-
-    return 1;
-}
-
-uint8_t spg290::BRL()
-{
-    uint8_t bc    = (instr >> 22) & 0xF;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-
-    writeReg(3, pc);   // link unconditionally
-
-    if (evalCondition(bc))
-        pc = regs[a_reg];
 
     return 1;
 }
@@ -1832,72 +1566,6 @@ uint8_t spg290::RORIC()
     return 1;
 }
 
-// ---- Saturating arithmetic -----------------------------------------
-// All saturating ops clamp the true (wider) result to the signed 32-bit
-// range [INT32_MIN, INT32_MAX].
-
-static inline uint32_t satFromI64(int64_t v)
-{
-    if (v > 0x7FFFFFFFLL)            return 0x7FFFFFFFu;
-    if (v < -0x80000000LL)          return 0x80000000u;
-    return (uint32_t)(int32_t)v;
-}
-
-uint8_t spg290::ADDS()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t sum = (int64_t)(int32_t)regs[a_reg] + (int64_t)(int32_t)regs[b_reg];
-    writeReg(d_reg, satFromI64(sum));
-    return 1;
-}
-
-uint8_t spg290::SUBS()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t diff = (int64_t)(int32_t)regs[a_reg] - (int64_t)(int32_t)regs[b_reg];
-    writeReg(d_reg, satFromI64(diff));
-    return 1;
-}
-
-uint8_t spg290::ABSS()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    int64_t a = (int64_t)(int32_t)regs[a_reg];
-    int64_t r = (a >= 0) ? a : -a;       // -INT32_MIN clamps to INT32_MAX below
-    writeReg(d_reg, satFromI64(r));
-    return 1;
-}
-
-uint8_t spg290::SLLS()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t a = (int64_t)(int32_t)regs[a_reg];
-    uint8_t sa = regs[b_reg] & 0x1F;
-    int64_t shifted = a << sa;            // widen first, then clamp
-    writeReg(d_reg, satFromI64(shifted));
-    return 1;
-}
-
-// ---- Custom engine: 32-bit fractional multiply-subtract ------------
-
-uint8_t spg290::MSBF()
-{
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-    int64_t prod = ((int64_t)(int32_t)regs[a_reg] * (int64_t)(int32_t)regs[b_reg]) << 1;
-    uint64_t acc = packCE(ceh, cel) - (uint64_t)prod;
-    cel = (uint32_t)(acc & 0xFFFFFFFF);
-    ceh = (uint32_t)(acc >> 32);
-    return 1;
-}
-
 // ---- Half-word multiply-accumulate family --------------------------
 // Control field HZFSU lives in bits [25:21]:
 //   H = high half  (use bits [31:16] and target CEH; else low half -> CEL)
@@ -1907,93 +1575,45 @@ uint8_t spg290::MSBF()
 //   U = unsigned   (16-bit operands are zero-extended; else sign-extended)
 // Saturation (.fs forms) applies when F && !Z.
 
-uint8_t spg290::HWMAC()
-{
-    uint8_t sel   = (instr & 0x3E00000) >> 21;   // HZFSU
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t b_reg = (instr & 0x7C00) >> 10;
-
-    bool H = sel & 0x10;
-    bool Z = sel & 0x08;
-    bool F = sel & 0x04;
-    bool S = sel & 0x02;
-    bool U = sel & 0x01;
-
-    uint32_t va = regs[a_reg];
-    uint32_t vb = regs[b_reg];
-    uint32_t halfA = H ? (va >> 16) : (va & 0xFFFF);
-    uint32_t halfB = H ? (vb >> 16) : (vb & 0xFFFF);
-
-    int64_t product;
-    if (U)
-        product = (int64_t)(uint32_t)(halfA & 0xFFFF) * (int64_t)(uint32_t)(halfB & 0xFFFF);
-    else
-        product = (int64_t)(int16_t)(halfA & 0xFFFF) * (int64_t)(int16_t)(halfB & 0xFFFF);
-
-    if (F) product <<= 1;
-
-    uint32_t cur  = H ? ceh : cel;
-    int64_t  base = Z ? 0 : (int64_t)(int32_t)cur;
-    int64_t  acc  = S ? (base - product) : (base + product);
-
-    uint32_t result;
-    if (F && !Z)
-        result = satFromI64(acc);          // .fs saturating forms
-    else
-        result = (uint32_t)(acc & 0xFFFFFFFF);
-
-    if (H) ceh = result; else cel = result;
-    return 1;
-}
-
 // ---- Pre/post-index load/store family ------------------------------
 // Effective address handling mirrors the base load/store ops, but the base
 // register rA is always updated by sext(Imm12) afterwards. Pre-index uses
 // (rA + imm) as the access address; post-index uses rA, then updates rA.
 
-uint8_t spg290::LSU_UPD()
+// ---- Pre/post-index load/store (RIX-form, opcodes 3 and 7) ---------
+// Imm12 = raw 14:3 (signed), func3 = raw 2:0: 0 lw, 1 lh, 2 lhu, 3 lb,
+// 4 sw, 5 sh, 6 lbu, 7 sb. Pre-index updates rA first and accesses [rA];
+// post-index accesses [rA] and then updates it. A load into rA itself
+// therefore keeps the loaded value for pre-index and the updated address
+// for post-index.
+uint8_t spg290::RIX(bool pre)
 {
     uint8_t d_reg = (instr & 0x3E00000) >> 21;
     uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t sub   = (instr >> 13) & 0x7;          // which load/store
-    int32_t imm   = (instr >> 1) & 0xFFF;         // 12-bit immediate
-    imm = (imm << 20) >> 20;                      // sign-extend
-    bool    pre   = instr & 0x1;
+    uint8_t func3 = instr & 0x7;
+    int32_t imm   = (int32_t)((instr >> 3) & 0xFFF);
+    imm = (imm << 20) >> 20;                      // sign-extend 12 bits
 
     uint32_t base = regs[a_reg];
-    uint32_t addr = pre ? (base + (uint32_t)imm) : base;
+    uint32_t next = base + (uint32_t)imm;
+    uint32_t addr = pre ? next : base;
+    uint32_t src  = regs[d_reg];                  // store data is read before any writeback
 
-    switch (sub)
+    if (pre) writeReg(a_reg, next);
+
+    switch (func3)
     {
-    case 0: // lw
-        writeReg(d_reg, readWord(addr));
-        break;
-    case 1: // sw
-        writeWord(addr, regs[d_reg]);
-        break;
-    case 2: // lbu
-        writeReg(d_reg, readByte(addr));
-        break;
-    case 3: // lb
-        writeReg(d_reg, (uint32_t)(int32_t)(int8_t)readByte(addr));
-        break;
-    case 4: // lhu
-        writeReg(d_reg, readHalf(addr));
-        break;
-    case 5: // lh
-        writeReg(d_reg, (uint32_t)(int32_t)(int16_t)readHalf(addr));
-        break;
-    case 6: // sb
-        writeByte(addr, (uint8_t)regs[d_reg]);
-        break;
-    case 7: // sh
-        writeHalf(addr, (uint16_t)regs[d_reg]);
-        break;
+    case 0: writeReg(d_reg, readWord(addr)); break;                                   // lw
+    case 1: writeReg(d_reg, (uint32_t)(int32_t)(int16_t)readHalf(addr)); break;       // lh
+    case 2: writeReg(d_reg, readHalf(addr)); break;                                   // lhu
+    case 3: writeReg(d_reg, (uint32_t)(int32_t)(int8_t)readByte(addr)); break;        // lb
+    case 4: writeWord(addr, src); break;                                              // sw
+    case 5: writeHalf(addr, (uint16_t)src); break;                                    // sh
+    case 6: writeReg(d_reg, readByte(addr)); break;                                   // lbu
+    case 7: writeByte(addr, (uint8_t)src); break;                                     // sb
     }
 
-    // Base register writeback happens last so that, when rD == rA on a load,
-    // the writeback value wins (matching the spec's sequential semantics).
-    writeReg(a_reg, base + (uint32_t)imm);
+    if (!pre) writeReg(a_reg, next);
     return 1;
 }
 
@@ -2177,55 +1797,6 @@ uint8_t spg290::decode16()
     return 1;
 }
 
-// ====================================================================
-// System / coprocessor register moves (OP_SYS).
-//   rD       = bits 25:21
-//   regnum/rA= bits 20:16  (control/special/coprocessor register number,
-//                           or the second GPR for the mfcex/mtcex pair)
-//   sub-op   = bits 14:10  (SYS_SUBOP)
-//   CP#/{HI,LO} = bits 9:8 (coprocessor number, or HI/LO for cex moves)
-// These ops do not touch the condition flags.
-// ====================================================================
-uint8_t spg290::SYS()
-{
-    uint8_t sub = (instr >> 10) & 0x1F;
-    switch (sub)
-    {
-    case SYS_MFCR:  return MFCR();
-    case SYS_MTCR:  return MTCR();
-    case SYS_MFSR:  return MFSR();
-    case SYS_MTSR:  return MTSR();
-    case SYS_MFCX:  return MFCX();
-    case SYS_MTCX:  return MTCX();
-    case SYS_MFCCX: return MFCCX();
-    case SYS_MTCCX: return MTCCX();
-    case SYS_MFCEX: return MFCEX();
-    case SYS_MTCEX: return MTCEX();
-    case SYS_COPX:  return COPX();
-    case SYS_TCOND: return TCOND();
-    case SYS_TRAP:  return TRAPCOND();
-    case SYS_SYSCALL: return SYSCALL();
-    case SYS_RTE:   return RTE();
-    case SYS_DRTE:  return DRTE();
-    case SYS_LDCX:  return LDCX();
-    case SYS_STCX:  return STCX();
-    case SYS_LCB:   return LCB();
-    case SYS_LCW:   return LCW();
-    case SYS_LCE:   return LCE();
-    case SYS_SCB:   return SCB();
-    case SYS_SCW:   return SCW();
-    case SYS_SCE:   return SCE();
-    // sleep / cache / pflush / sdbbp / ceinst have no architectural effect
-    // in this emulator and execute as no-ops.
-    case SYS_SLEEP:
-    case SYS_CACHE:
-    case SYS_PFLUSH:
-    case SYS_SDBBP:
-    case SYS_CEINST:
-    default:        return 1;
-    }
-}
-
 uint8_t spg290::MFCR()
 {
     uint8_t d_reg  = (instr & 0x3E00000) >> 21;
@@ -2259,91 +1830,6 @@ uint8_t spg290::MTSR()
     uint8_t regnum = (instr & 0x3E00000) >> 21;
     uint8_t a_reg  = (instr & 0x1F0000) >> 16;
     sr[regnum] = regs[a_reg];
-    return 1;
-}
-
-uint8_t spg290::MFCX()
-{
-    uint8_t d_reg  = (instr & 0x3E00000) >> 21;
-    uint8_t regnum = (instr & 0x1F0000) >> 16;
-    uint8_t cp     = (instr >> 8) & 0x3;
-    writeReg(d_reg, copData[cp][regnum]);
-    return 1;
-}
-
-uint8_t spg290::MTCX()
-{
-    uint8_t d_reg  = (instr & 0x3E00000) >> 21;
-    uint8_t regnum = (instr & 0x1F0000) >> 16;
-    uint8_t cp     = (instr >> 8) & 0x3;
-    copData[cp][regnum] = regs[d_reg];
-    return 1;
-}
-
-uint8_t spg290::MFCCX()
-{
-    uint8_t d_reg  = (instr & 0x3E00000) >> 21;
-    uint8_t regnum = (instr & 0x1F0000) >> 16;
-    uint8_t cp     = (instr >> 8) & 0x3;
-    writeReg(d_reg, copCtrl[cp][regnum]);
-    return 1;
-}
-
-uint8_t spg290::MTCCX()
-{
-    uint8_t d_reg  = (instr & 0x3E00000) >> 21;
-    uint8_t regnum = (instr & 0x1F0000) >> 16;
-    uint8_t cp     = (instr >> 8) & 0x3;
-    copCtrl[cp][regnum] = regs[d_reg];
-    return 1;
-}
-
-// mfcex / mtcex: HI=bit9, LO=bit8 select CEH/CEL (and the combined
-// {HI,LO}=11 forms mfcehl/mtcehl move both halves at once via rD/rA).
-uint8_t spg290::MFCEX()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t hilo  = (instr >> 8) & 0x3;
-    switch (hilo)
-    {
-    case 0x1: writeReg(d_reg, cel); break;                       // mfcel
-    case 0x2: writeReg(d_reg, ceh); break;                       // mfceh
-    case 0x3: writeReg(d_reg, ceh); writeReg(a_reg, cel); break;    // mfcehl
-    default: break;
-    }
-    return 1;
-}
-
-uint8_t spg290::MTCEX()
-{
-    uint8_t d_reg = (instr & 0x3E00000) >> 21;
-    uint8_t a_reg = (instr & 0x1F0000) >> 16;
-    uint8_t hilo  = (instr >> 8) & 0x3;
-    switch (hilo)
-    {
-    case 0x1: cel = regs[d_reg]; break;                       // mtcel
-    case 0x2: ceh = regs[d_reg]; break;                       // mtceh
-    case 0x3: ceh = regs[d_reg]; cel = regs[a_reg]; break;    // mtcehl
-    default: break;
-    }
-    return 1;
-}
-
-uint8_t spg290::COPX()
-{
-    // User-defined coprocessor extension; no architectural side effects to
-    // model in this emulator. Executed as a no-op.
-    return 1;
-}
-
-// t{cond}: set/clear the T flag based on the condition-code test. EC lives in
-// bits 20:16. (Note EC=14/CNZ depends on a count register we do not model, so
-// it evaluates false.)
-uint8_t spg290::TCOND()
-{
-    uint8_t ec = (instr >> 16) & 0xF;
-    SetFlag(T, evalCondition(ec));
     return 1;
 }
 
@@ -2450,31 +1936,6 @@ uint8_t spg290::CRFORM()
     case CRF6_SLEEP: return SLEEP();
     default:         return 1;
     }
-}
-
-// ldcx: load a coprocessor data register from memory at GPRrD + sext(imm).
-// rD=bits 25:21 (base), CrA=bits 20:16, CP#=bits 9:8, imm=bits 7:0 (signed).
-uint8_t spg290::LDCX()
-{
-    uint8_t base   = (instr >> 21) & 0x1F;
-    uint8_t creg   = (instr >> 16) & 0x1F;
-    uint8_t cp     = (instr >> 8) & 0x3;
-    int32_t imm    = (int32_t)(int8_t)(instr & 0xFF);
-    uint32_t addr  = regs[base] + (uint32_t)imm;
-    copData[cp][creg] = readWord(addr);
-    return 1;
-}
-
-// stcx: store a coprocessor data register to memory at GPRrD + sext(imm).
-uint8_t spg290::STCX()
-{
-    uint8_t base   = (instr >> 21) & 0x1F;
-    uint8_t creg   = (instr >> 16) & 0x1F;
-    uint8_t cp     = (instr >> 8) & 0x3;
-    int32_t imm    = (int32_t)(int8_t)(instr & 0xFF);
-    uint32_t addr  = regs[base] + (uint32_t)imm;
-    writeWord(addr, copData[cp][creg]);
-    return 1;
 }
 
 // ============================================================

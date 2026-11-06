@@ -155,114 +155,81 @@ private:
 	uint32_t	func3_MASK	= 0x1C0000;
 
 	// ============================================================
-	// Internal instruction-encoding convention (this emulator).
-	//
-	// The S+core7 manual's binary "Form" diagrams are not available,
-	// so this project defines its own consistent 32-bit encoding that
-	// matches the existing ANDX/ANDIX/ANDRIX decoders and the encoder
-	// helpers in tests/test_helpers.h.
-	//
-	//   bit   31     : 32-bit instruction indicator (don't-care on decode)
+	// 32-bit instruction fields, as fetched (raw word, both P-bits set):
+	//   bit   31, 15 : P-bits (both 1 for a 32-bit instruction)
 	//   bits  30:26  : opcode      (OPCODE_MASK)
 	//   bits  25:21  : rD
 	//   bits  20:16  : rA
-	//   bits  14:10  : rB  (also used as the 5-bit shift amount SA)
-	//   bits   6:1   : func6  (R-type sub-function, when opcode == 0)
-	//   bit    0     : CU (condition-flag update bit)
-	//
-	//   I-type  (opcode 0x01 / 0x02): func3 = bits 20:18, imm16 = bits 16:1
-	//   RIX-type(opcode 0x0C..0x0F) : rA = bits 20:16,    imm14 = bits 14:1
-	//
-	// imm16/imm14 deliberately start at bit 1 so they never collide with
-	// the CU bit at bit 0.
+	//   bits  14:10  : rB  (also the shift amount, bit number or EC)
+	//   bits   6:1   : func6  (Special-form, opcode 0)
+	//   bit    0     : CU (condition-flag update bit), LK for br/b/j
+	// Immediates skip the P-bit at 15: I-form Imm16 = raw 17:16 | 14:1,
+	// RI-form Imm14 = raw 14:1, RIX-form Imm12 = raw 14:3 with func3 = raw 2:0,
+	// LS-form Imm15 = raw 14:0. See plan section 2.3 for the opcode table.
 	// ============================================================
 
-	// Opcode-0 func6 values
-	// R-type func6 field (bits 6:1). Values confirmed from score-elf-as
-	// (binutils 2.25) unless marked TODO.
-	// Values 0x60+ are placeholders for unknowns that conflicted with confirmed ones.
+	// Special-form (opcode 0) func6, raw bits 6:1 (plan 2.4, S+core7 PDF and MAME).
+	// Undefined values (06 07 0E 19 26 27 32 36 39) raise RI.
 	enum FUNC6
 	{
-		F6_NOP    = 0x00,  // nop              confirmed
-		F6_ADDX   = 0x08,  // add    (was 0x01)
-		F6_ADDCX  = 0x09,  // addc   (was 0x02)
-		F6_SUBX   = 0x0A,  // sub    (was 0x03)
-		F6_SUBCX  = 0x0B,  // subc   (was 0x04)
-		F6_NEGX   = 0x0F,  // neg    (was 0x05)
-		F6_CMP    = 0x06,  // cmp.c   CONFIRMED real value is 0x0C via score-elf-as, but that
-		                   // collides with the (not-yet-audited) HWMAC/CE family's F6_MAD
-		                   // at the same slot -- kept at this placeholder until that family
-		                   // is moved to its real opcode (0x1C). See /memories/session/phase2-isa-audit.md.
-		F6_CMPZ   = 0x07,  // cmpz.c  CONFIRMED real value is 0x0D; blocked by F6_MADU, same as above.
-		F6_MVCOND = 0x26,  // mv/mvcond CONFIRMED real value is 0x2B; blocked by F6_ADDS, same as above.
-		F6_REM    = 0x27,  // TODO: unknown; likely not a real distinct instruction (REM/REMU look
-		                   // like div+mfceh in practice -- no mnemonic found via score-elf-as)
-		F6_REMU   = 0x2A,  // TODO: unknown, same caveat as F6_REM (was 0x28, moved to avoid
-		                   // colliding with the now-confirmed F6_MFSR)
-		F6_MAD    = 0x0C,  // HWMAC sub-field (not R-type dispatch)
-		F6_MADU   = 0x0D,  // HWMAC sub-field
-		F6_MSB    = 0x0E,  // HWMAC sub-field
-			// F6_MSBU: moved to 0x32 below (was 0x0F, conflicted with new F6_NEGX)
-		F6_ANDX   = 0x10,  // and              confirmed
-		F6_ORX    = 0x11,  // or               confirmed
-		F6_NOTX   = 0x12,  // not    (was 0x13, swapped with XOR)
-		F6_XORX   = 0x13,  // xor    (was 0x12, swapped with NOT)
-		F6_BITTSTC= 0x14,  // bittst.c CONFIRMED real value is 0x16; blocked by F6_MADF, see above.
-		F6_MULF   = 0x15,  // HWMAC sub-field (TODO: confirm)
-		F6_MADF   = 0x16,  // HWMAC sub-field (TODO: confirm)
-		F6_ROLC   = 0x17,  // rolc.c  CONFIRMED real value is 0x1F; blocked by F6_MSBF, see above.
-		F6_ROLIC  = 0x3F,  // rolic.c CONFIRMED via score-elf-as (no collision)
-		F6_RORC   = 0x19,  // rorc.c  CONFIRMED real value is 0x1D; blocked by F6_ABSS, see above.
-		F6_RORIC  = 0x3D,  // roric.c CONFIRMED via score-elf-as (no collision)
-		// Saturating/fractional live in OP_HWMAC — kept as aliases for HWMAC dispatch.
-		F6_ADDS   = 0x2B,  // add.s → HWMAC (was 0x1B, conflicted with SRAX)
-		F6_SUBS   = 0x30,  // sub.s → HWMAC (was 0x1C, conflicted with RORX)
-		F6_ABSS   = 0x1D,  // abs.s → HWMAC, no conflict
-		F6_SLLS   = 0x31,  // sll.s → HWMAC (was 0x1E, conflicted with ROLX)
-		F6_MSBF   = 0x1F,  // msb.f → HWMAC, no conflict
-		F6_SLLX   = 0x18,  // sll    (was 0x20)
-		F6_SRLX   = 0x1A,  // srl    (was 0x21)
-		F6_SRAX   = 0x1B,  // sra    (was 0x22)
-		F6_ROLX   = 0x1E,  // rol    (was 0x23)
-		F6_RORX   = 0x1C,  // ror    (was 0x24)
-		F6_SLLIX  = 0x38,  // slli   (was 0x25)
-		F6_SRLIX  = 0x3A,  // srli   (was 0x26)
-		F6_SRAIX  = 0x3B,  // srai   (was 0x27)
-		F6_ROLIX  = 0x3E,  // roli   (was 0x28)
-		F6_RORIX  = 0x3C,  // rori   (was 0x29)
-		F6_EXTSBX = 0x2C,  // extsb  (was 0x30)
-		F6_EXTSHX = 0x2D,  // extsh  (was 0x31)
-		F6_EXTZBX = 0x2E,  // extzb  (was 0x32)
-		F6_EXTZHX = 0x2F,  // extzh  (was 0x33)
-		// CLZ/ABS/MIN/MAX/BITREV live in OP_HWMAC, kept as aliases.
-		F6_CLZ    = 0x34,  // clz → HWMAC (no conflict, kept at original value)
-		F6_ABS    = 0x35,  // abs → HWMAC (no conflict)
-		F6_MIN    = 0x36,  // min → HWMAC (no conflict)
-		F6_MAX    = 0x37,  // max → HWMAC (no conflict)
-		F6_BITREV = 0x33,  // bitrev → HWMAC (was 0x38, conflicted with SLLIX)
-		F6_MUL    = 0x20,  // mul    (was 0x39)
-		F6_MULU   = 0x21,  // mulu   (was 0x3A)
-		F6_DIV    = 0x22,  // div    (was 0x3B)
-		F6_DIVU   = 0x23,  // divu   (was 0x3C)
-		// MFCEL/MFCEH share func6=0x24; rB field distinguishes (1=CEL, 2=CEH).
-		F6_MFCEL  = 0x24,  // mfcel  (was 0x3D)
-		F6_MFCEH  = 0x24,  // mfceh  same func6 as MFCEL (was 0x3E)
-		// MTCEL/MTCEH share func6=0x25; rB field distinguishes (1=CEL, 2=CEH).
-		F6_MTCEL  = 0x25,  // mtcel  (was 0x3F)
-		F6_MTCEH  = 0x25,  // mtceh  same func6 as MTCEL (was 0x09)
-		// MSBU shares 0x0F with NEGX; moved to 0x32
-		F6_MSBU   = 0x32,  // msbu HWMAC sub-field (was 0x0F, conflicted with NEGX)
-		// Confirmed via score-elf-as: these were previously only reachable through the
-		// (wrong) OP_SYS=0x1F sub-op scheme; real hardware dispatches them as ordinary
-		// R-type instructions at opcode 0. The OP_SYS paths are left in place (unused
-		// by real encodings, but harmless) since other OP_SYS sub-ops are still unaudited.
-		F6_SYSCALL= 0x01,  // syscall CONFIRMED
-		F6_TRAPCOND=0x02,  // trap{cond} CONFIRMED (rB&0xF = EC, rA = Imm5 software parameter)
-		F6_MFSR   = 0x28,  // mfsr CONFIRMED (rD = dest, rA = srn)
-		F6_MTSR   = 0x29,  // mtsr CONFIRMED (rA = source, rD = srn -- opposite of mfsr's rD/rA roles)
+		F6_NOP      = 0x00,
+		F6_SYSCALL  = 0x01,
+		F6_TRAPCOND = 0x02,  // trap{cond}: EC = rB
+		F6_SDBBP    = 0x03,
+		F6_BRCOND   = 0x04,  // br{cond}[l]: EC = rB, target = rA, LK = raw bit 0
+		F6_PFLUSH   = 0x05,
+		F6_ADDX     = 0x08,
+		F6_ADDCX    = 0x09,
+		F6_SUBX     = 0x0A,
+		F6_SUBCX    = 0x0B,
+		F6_CMP      = 0x0C,  // cmp{TCS}.c: TCS = rD & 3
+		F6_CMPZ     = 0x0D,  // cmpz{TCS}.c
+		F6_NEGX     = 0x0F,
+		F6_ANDX     = 0x10,
+		F6_ORX      = 0x11,
+		F6_NOTX     = 0x12,
+		F6_XORX     = 0x13,
+		F6_BITCLR   = 0x14,
+		F6_BITSET   = 0x15,
+		F6_BITTST   = 0x16,
+		F6_BITTGL   = 0x17,
+		F6_SLLX     = 0x18,
+		F6_SRLX     = 0x1A,
+		F6_SRAX     = 0x1B,
+		F6_RORX     = 0x1C,
+		F6_RORC     = 0x1D,
+		F6_ROLX     = 0x1E,
+		F6_ROLC     = 0x1F,
+		F6_MUL      = 0x20,
+		F6_MULU     = 0x21,
+		F6_DIV      = 0x22,
+		F6_DIVU     = 0x23,
+		F6_MFCE     = 0x24,  // mfcel/mfceh/mfcehl: rB = 1/2/3
+		F6_MTCE     = 0x25,  // mtcel/mtceh/mtcehl: rB = 1/2/3
+		F6_MFSR     = 0x28,  // rD = dest, rA = srn
+		F6_MTSR     = 0x29,  // rA = source, rD = srn (unverified, see plan)
+		F6_TCOND    = 0x2A,  // t{cond}: EC = rB
+		F6_MVCOND   = 0x2B,  // mv{cond}: EC = rB; EC 14 = no-op
+		F6_EXTSBX   = 0x2C,
+		F6_EXTSHX   = 0x2D,
+		F6_EXTZBX   = 0x2E,
+		F6_EXTZHX   = 0x2F,
+		F6_LCB      = 0x30,
+		F6_LCW      = 0x31,
+		F6_LCE      = 0x33,
+		F6_SCB      = 0x34,
+		F6_SCW      = 0x35,
+		F6_SCE      = 0x37,
+		F6_SLLIX    = 0x38,
+		F6_SRLIX    = 0x3A,
+		F6_SRAIX    = 0x3B,
+		F6_RORIX    = 0x3C,
+		F6_RORIC    = 0x3D,
+		F6_ROLIX    = 0x3E,
+		F6_ROLIC    = 0x3F,
 	};
 
-	// Opcode field (bits 30:26). Values confirmed from score-elf-as unless TODO.
+	// Opcode field (bits 30:26), plan 2.3. Undefined opcodes raise RI.
 	enum OPCODES_ENUM
 	{
 		OP_RTYPE    = 0x00,
@@ -274,8 +241,6 @@ private:
 		OP_ANDRIX   = 0x0C,  // andri: rD=rA & imm14   confirmed
 		OP_ADDRIX   = 0x08,  // addri: rD=rA + imm14   (was 0x0D)
 		OP_ORRIX    = 0x0D,  // orri:  rD=rA | imm14   (was 0x0E)
-		OP_SUBRIX   = 0x0F,  // subri: TODO (GAS uses addri(-n); kept for compat)
-		OP_ITYPE2   = 0x03,  // placeholder: SUBIX/LDIS real opcode TODO (was 0x02, conflicted with JX)
 		// Load / store opcodes — all confirmed from score-elf-as:
 		OP_LW       = 0x10,  // lw   confirmed
 		OP_LH       = 0x11,  // lh   (was OP_SW=0x11)
@@ -289,55 +254,10 @@ private:
 		// score-elf-as); the link variant is selected by the CU bit (bit 0), same
 		// as every other CU-suffixed instruction -- there is no separate OP_BCONDL.
 		OP_BCOND    = 0x04,   // BC[13:10], split Disp[18:9]|Disp[8:0] (see BCOND())
-		OP_BR       = 0x1A,   // BC[25:22], rA[20:16]  -- NOT re-verified this pass
-		// Pre/post-index load/store family. rD[25:21], rA[20:16],
-		// sub-op[15:13] (0=lw,1=sw,2=lbu,3=lb,4=lhu,5=lh,6=sb,7=sh),
-		// signed Imm12[12:1], pre-index flag at bit 0 (1=pre, 0=post).
-		OP_LSU_UPD  = 0x1B,
-		// Half-word multiply-accumulate family. rA[20:16], rB[14:10],
-		// HZFSU control field in bits [25:21] (H=high half, Z=zero start,
-		// F=fractional, S=subtract, U=unsigned).
-		OP_HWMAC    = 0x1C,
-		OP_BRL      = 0x1E,   // br{cond}l: BR + link r3 -- NOT re-verified this pass
-		// System / coprocessor register moves. The last available opcode is
-		// shared by the whole group; the specific operation is chosen by a
-		// 5-bit sub-op field in bits 14:10 (see SYS_SUBOP).
-		//   rD = bits 25:21, regnum / rA = bits 20:16, CP#/{HI,LO} = bits 9:8.
-		OP_SYS      = 0x1F,
-	};
-
-	// Sub-op selector for OP_SYS (bits 14:10).
-	enum SYS_SUBOP
-	{
-		SYS_MFCR  = 0x00,
-		SYS_MTCR  = 0x01,
-		SYS_MFSR  = 0x02,
-		SYS_MTSR  = 0x03,
-		SYS_MFCX  = 0x04,
-		SYS_MTCX  = 0x05,
-		SYS_MFCCX = 0x06,
-		SYS_MTCCX = 0x07,
-		SYS_MFCEX = 0x08,
-		SYS_MTCEX = 0x09,
-		SYS_COPX  = 0x0A,
-		SYS_TCOND = 0x0B,   // t{cond}    : T = condition (EC in bits 20:16)
-		SYS_TRAP  = 0x0C,   // trap{cond} : exception if condition (EC in 20:16)
-		SYS_SYSCALL = 0x0D, // syscall    : unconditional system-call exception
-		SYS_RTE   = 0x0E,   // rte        : PC = EPC (cr5)
-		SYS_DRTE  = 0x0F,   // drte       : PC = DEPC (cr30)
-		SYS_SLEEP = 0x10,   // sleep      : no-op here
-		SYS_CACHE = 0x11,   // cache      : no-op here
-		SYS_PFLUSH= 0x12,   // pflush     : no-op here
-		SYS_SDBBP = 0x13,   // sdbbp      : debug breakpoint -> no-op
-		SYS_CEINST= 0x14,   // ceinst     : user-defined custom-engine op -> no-op
-		SYS_LDCX  = 0x15,   // ldcx       : copData[CP#][CrA] = Mem[rD + imm]
-		SYS_STCX  = 0x16,   // stcx       : Mem[rD + imm] = copData[CP#][CrA]
-		SYS_LCB   = 0x17,   // lcb        : load-combine begin  (LCR = Mem; rA+=4)
-		SYS_LCW   = 0x18,   // lcw        : load-combine word
-		SYS_LCE   = 0x19,   // lce        : load-combine end
-		SYS_SCB   = 0x1A,   // scb        : store-combine begin
-		SYS_SCW   = 0x1B,   // scw        : store-combine word
-		SYS_SCE   = 0x1C,   // sce        : store-combine end
+		// Pre/post-index load/store (RIX-form): Imm12 = raw 14:3, func3 = raw 2:0.
+		OP_RIX_PRE  = 0x03,
+		OP_RIX_POST = 0x07,
+		OP_CACHE    = 0x18,   // cache: no-op
 	};
 
 	// Exception cause codes (ECR.Exc_code) from the Sunplus Linux score port.
@@ -372,7 +292,7 @@ private:
 	{
 		F3_ADDIX  = 0x0,  // addi  confirmed
 		F3_ORIX   = 0x5,  // ori   (was 0x1)
-		F3_CMPI   = 0x2,  // cmpi  TODO: real encoding unknown, no conflict
+		F3_CMPI   = 0x2,  // cmpi  (PDF/MAME: opcode 1, func3 2)
 		F3_LDI    = 0x6,  // ldi   (was 0x3)
 		F3_ANDIX  = 0x4,  // andi  confirmed
 	};
@@ -381,25 +301,11 @@ private:
 	// Confirmed from score-elf-as: addis=0, andis=4, oris=5
 	enum FUNC3_IS
 	{
+		F3_CMPISX = 0x2,  // cmpis (Imm16 << 16)
 		F3_ADDISX = 0x0,  // addis  (was F3_ADDISX=6 under OP_ITYPE1)
 		F3_ANDISX = 0x4,  // andis  (was F3_ANDISX=5 under OP_ITYPE1)
 		F3_ORISX  = 0x5,  // oris   (was F3_ORISX=7 under OP_ITYPE1)
-		F3_LDISX  = 0x6,  // ldis   CONFIRMED via score-elf-as: real ldis is OP_ITYPE_S
-		                  // func3=6 (parallels ldi's func3=6 under OP_ITYPE1), NOT the
-		                  // separate OP_ITYPE2 placeholder opcode below.
-	};
-
-	// func3 within OP_ITYPE2 (opcode 0x03: placeholder, kept for backward
-	// compatibility). subi/subis/subri are NOT real instructions -- confirmed via
-	// score-elf-as that GAS silently expands them to addi/addri with a negated
-	// immediate, so there is no real opcode to find for F3_SUBIX/F3_SUBISX. This
-	// whole opcode slot is an emulator-only convention now superseded by
-	// F3_LDISX above for ldis; left in place since existing tests still use it.
-	enum FUNC3_I2
-	{
-		F3_LDIS   = 0x0,
-		F3_SUBIX  = 0x1,
-		F3_SUBISX = 0x2,
+		F3_LDISX  = 0x6,  // ldis   (func3 6, parallels ldi under OP_ITYPE1)
 	};
 
 	// Shared helper: evaluate a 4-bit execution condition against the flags.
@@ -414,8 +320,13 @@ private:
 	uint8_t ANDIX();	// Logical AND with Immediate
 	uint8_t ANDISX();
 	uint8_t ANDRIX();	// Logical AND Register with Immediate
-	uint8_t BITTSTC();	
-	uint8_t CEINST();	
+	uint8_t BITTSTC();
+	uint8_t BITCLR();
+	uint8_t BITSET();
+	uint8_t BITTGL();
+	uint8_t bitOp(int kind);   // 0 clear, 1 set, 2 toggle
+	uint8_t BR();		// br{cond}[l]: conditional branch to register
+	uint8_t TCOND();	// t{cond}	
 	uint8_t ORX();
 
 	// --- R-type arithmetic / logic ---
@@ -434,9 +345,7 @@ private:
 	uint8_t ORIX();		// OR with imm16 (zero-extended)
 	uint8_t ORISX();	// OR with imm16 << 16
 	uint8_t ORRIX();	// OR register with imm14 (zero-extended)
-	uint8_t SUBIX();	// Subtract imm16 (signed)
-	uint8_t SUBISX();	// Subtract imm16 << 16
-	uint8_t SUBRIX();	// Subtract register with imm14 (signed)
+	uint8_t CMPIS();	// Compare with imm16 << 16
 	uint8_t CMPI();		// Compare with imm16 (signed)
 	uint8_t LDI();		// Load sign-extended imm16
 	uint8_t LDIS();		// Load imm16 << 16
@@ -458,31 +367,18 @@ private:
 	uint8_t EXTSHX();	// Extend sign of half-word
 	uint8_t EXTZBX();	// Extend zero of byte
 	uint8_t EXTZHX();	// Extend zero of half-word
-	uint8_t CLZ();		// Count leading zeros
-	uint8_t ABS();		// Absolute value
-	uint8_t MIN();		// Minimum (signed)
-	uint8_t MAX();		// Maximum (signed)
-	uint8_t BITREV();	// Bit reverse with shift right logical
 
 	// --- Custom engine: multiply / divide / moves ---
 	uint8_t MUL();		// Signed multiply -> {CEH,CEL}
 	uint8_t MULU();		// Unsigned multiply -> {CEH,CEL}
 	uint8_t DIV();		// Signed divide -> CEL=quotient, CEH=remainder
 	uint8_t DIVU();		// Unsigned divide -> CEL=quotient, CEH=remainder
-	uint8_t REM();		// Signed remainder -> rD
-	uint8_t REMU();		// Unsigned remainder -> rD
 	uint8_t MFCEL();	// rD = CEL
 	uint8_t MFCEH();	// rD = CEH
 	uint8_t MTCEL();	// CEL = rA
 	uint8_t MTCEH();	// CEH = rA
 
 	// --- Custom engine: multiply-accumulate ---
-	uint8_t MAD();		// {CEH,CEL} += rA * rB (signed)
-	uint8_t MADU();		// {CEH,CEL} += rA * rB (unsigned)
-	uint8_t MSB();		// {CEH,CEL} -= rA * rB (signed)
-	uint8_t MSBU();		// {CEH,CEL} -= rA * rB (unsigned)
-	uint8_t MULF();		// {CEH,CEL} = (rA * rB) << 1 (signed fractional)
-	uint8_t MADF();		// {CEH,CEL} += (rA * rB) << 1 (signed fractional)
 
 	// --- Loads / stores ---
 	uint8_t LW();
@@ -497,9 +393,7 @@ private:
 	// --- Control flow ---
 	uint8_t BCOND();	// Conditional relative branch
 	uint8_t JX();		// Jump (and link)
-	uint8_t BR();		// Conditional branch to register
 	uint8_t BCONDL();	// Conditional relative branch and link
-	uint8_t BRL();		// Conditional branch to register and link
 
 	// --- Rotate through carry ---
 	uint8_t ROLC();		// Rotate left through carry (register amount)
@@ -508,17 +402,11 @@ private:
 	uint8_t RORIC();	// Rotate right through carry (immediate amount)
 
 	// --- Saturating arithmetic ---
-	uint8_t ADDS();		// Add with signed saturation
-	uint8_t SUBS();		// Subtract with signed saturation
-	uint8_t ABSS();		// Absolute value with signed saturation
-	uint8_t SLLS();		// Shift-left logical with signed saturation
 
 	// --- Custom engine extras ---
-	uint8_t MSBF();		// {CEH,CEL} -= (rA*rB)<<1 (signed fractional)
-	uint8_t HWMAC();	// Half-word multiply-accumulate family (HZFSU control)
 
-	// --- Pre/post-index load/store family ---
-	uint8_t LSU_UPD();
+	// --- Pre/post-index load/store family (RIX-form) ---
+	uint8_t RIX(bool pre);
 
 	// ============================================================
 	// 16-bit instruction set ("!"-suffixed forms), S+core7 PDF 2.2.
@@ -537,30 +425,19 @@ private:
 	// r16..r31) and an r0..r7 base in bits 6:4.
 	uint8_t decode16();
 
-	// --- System / coprocessor register moves (OP_SYS dispatcher) ---
-	uint8_t SYS();
+	// --- Control / special register moves ---
 	uint8_t MFCR();		// rD = cr[regnum]
 	uint8_t MTCR();		// cr[regnum] = rD
 	uint8_t MFSR();		// rD = sr[regnum]
 	uint8_t MTSR();		// sr[regnum] = rA
-	uint8_t MFCX();		// rD = copData[CP#][regnum]
-	uint8_t MTCX();		// copData[CP#][regnum] = rD
-	uint8_t MFCCX();	// rD = copCtrl[CP#][regnum]
-	uint8_t MTCCX();	// copCtrl[CP#][regnum] = rD
-	uint8_t MFCEX();	// rD/rA <- CEH/CEL per {HI,LO}
-	uint8_t MTCEX();	// CEH/CEL <- rD/rA per {HI,LO}
-	uint8_t COPX();		// user-defined coprocessor op (no architectural effect)
 
 	// --- Conditional test / trap / system control ---
-	uint8_t TCOND();	// t{cond}    : T = condition
 	uint8_t TRAPCOND();	// trap{cond} : conditional trap exception
 	uint8_t SYSCALL();	// syscall    : unconditional system-call exception
 	uint8_t RTE();		// rte        : return from exception (PC = EPC)
 	uint8_t DRTE();		// drte       : debug return from exception (PC = DEPC)
 	uint8_t SLEEP();	// sleep      : halt until the IRQ line is asserted
 	uint8_t CRFORM();	// opcode 0x06 dispatcher
-	uint8_t LDCX();		// ldcx       : load coprocessor data register from memory
-	uint8_t STCX();		// stcx       : store coprocessor data register to memory
 
 	// --- Un-aligned load/store combine (LCR=sr1, SCR=sr2) ---
 	uint8_t LCB();		// lcb        : load-combine begin
