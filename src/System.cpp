@@ -29,9 +29,69 @@ System::RunStats System::run(uint64_t maxFrames, uint64_t maxInstructions, const
 		maxInstructions = DEFAULT_INSTRUCTION_CAP;
 
 	RunStats s;
+	const bool trackCalls = logCalls || stopOnCall || stubCalls;
+	auto inCallRegion = [](uint32_t pc) {
+		const uint32_t p = pc & 0x1FFFFFFFu;   // ignore the cached/uncached window bits
+		return p >= CALL_REGION_LO && p < CALL_REGION_HI;
+	};
+	bool wasInRegion = trackCalls && inCallRegion(bus.cpu.pc);
 	for (;;)
 	{
-		bus.cpu.clock();
+		bool stubbed = false;
+		if (trackCalls)
+		{
+			const bool in = inCallRegion(bus.cpu.pc);
+			if (in && !wasInRegion)
+			{
+				CallEvent e;
+				e.target = bus.cpu.pc;
+				e.caller = bus.cpu.regs[3];
+				for (int i = 0; i < 4; ++i)
+					e.args[i] = bus.cpu.regs[4 + i];
+				e.instruction = s.instructions;
+				e.frame = s.frames;
+				++m_totalCalls;
+				if (m_callSequence.size() < CALL_SEQUENCE_CAP)
+					m_callSequence.push_back(e);
+				CallStat* stat = nullptr;
+				for (CallStat& c : m_callStats)
+					if (c.target == e.target) { stat = &c; break; }
+				if (!stat)
+				{
+					CallStat c;
+					c.target = e.target;
+					c.first = e;
+					m_callStats.push_back(c);
+					stat = &m_callStats.back();
+				}
+				++stat->count;
+
+				if (stubCalls)
+				{
+					// Return to the caller with r4 = 0. A link register that points back
+					// into the region (or at 0) would loop forever, so stop instead.
+					if (inCallRegion(e.caller) || (e.caller & 0x1FFFFFFFu) == 0)
+					{
+						s.reason = StopReason::BadCallReturn;
+						break;
+					}
+					// r4 = 0, or with stubRamp the number of earlier calls to this same target
+					// times stubRamp, which lets a poll for a growing tick count finish.
+					bus.cpu.regs[4] = (uint32_t)((stat->count - 1) * stubRamp);
+					bus.cpu.pc = e.caller;
+					stubbed = true;
+				}
+				else if (stopOnCall)
+				{
+					s.reason = StopReason::BiosCall;
+					break;
+				}
+			}
+			wasInRegion = inCallRegion(bus.cpu.pc);
+		}
+
+		if (!stubbed)
+			bus.cpu.clock();
 		bus.tick(CYCLES_PER_INSTRUCTION);
 		++s.instructions;
 		s.cpuCycles += CYCLES_PER_INSTRUCTION;
@@ -80,6 +140,8 @@ const char* System::stopReasonName(StopReason r)
 	case StopReason::InstructionLimit: return "instruction limit";
 	case StopReason::CpuFault:         return "CPU fault";
 	case StopReason::Hang:             return "hang";
+	case StopReason::BiosCall:         return "BIOS call";
+	case StopReason::BadCallReturn:    return "BIOS call with no usable return address";
 	}
 	return "unknown";
 }

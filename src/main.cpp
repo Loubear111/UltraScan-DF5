@@ -37,6 +37,10 @@ void usage(const char* argv0)
 		"  --trace N           print the last N executed instructions at the end\n"
 		"  --stop-on-unimpl    stop at the first undefined/unimplemented instruction\n"
 		"  --stop-on-hang      stop when the program branches to itself in a loop\n"
+		"  --log-calls         list calls the program makes into the BIOS area 0x800-0x8FFFF\n"
+		"  --stop-on-call      stop at the first such call (implies --log-calls)\n"
+		"  --stub-calls        answer such calls with r4 = 0 and carry on (implies --log-calls)\n"
+		"  --stub-ramp N       with --stub-calls: answer the k-th call to a target with k*N (default 0)\n"
 		"ADDR/VALUE accept 0x hex or decimal.\n",
 		argv0);
 }
@@ -56,6 +60,10 @@ struct Options
 	size_t trace = 0;
 	bool stopOnUnimpl = false;
 	bool stopOnHang = false;
+	bool logCalls = false;
+	bool stopOnCall = false;
+	bool stubCalls = false;
+	uint32_t stubRamp = 0;
 };
 
 bool parseNumber(const std::string& s, unsigned long long& out)
@@ -104,6 +112,10 @@ bool parseArgs(int argc, char** argv, Options& o)
 		else if (a == "--big-endian")     o.boot.littleEndian = false;
 		else if (a == "--stop-on-unimpl") o.stopOnUnimpl = true;
 		else if (a == "--stop-on-hang")   o.stopOnHang = true;
+		else if (a == "--log-calls")      o.logCalls = true;
+		else if (a == "--stop-on-call")   o.stopOnCall = true;
+		else if (a == "--stub-calls")     o.stubCalls = true;
+		else if (a == "--stub-ramp")      { if (!value(v)) return false; o.stubRamp = (uint32_t)v; o.stubCalls = true; }
 		else if (a == "--load")           { if (!value(v)) return false; o.boot.loadAddr = (uint32_t)v; }
 		else if (a == "--entry")          { if (!value(v)) return false; o.boot.entryPc = (uint32_t)v; o.entryGiven = true; }
 		else if (a == "--cr3")            { if (!value(v)) return false; o.boot.cr3 = (uint32_t)v; }
@@ -184,6 +196,10 @@ int main(int argc, char** argv)
 	sys.bus.cpu.setStopOnUnimplemented(o.stopOnUnimpl);
 	sys.bus.cpu.setStopOnHang(o.stopOnHang);
 	sys.bus.cpu.setTraceDepth(o.trace);
+	sys.logCalls   = o.logCalls || o.stopOnCall || o.stubCalls;
+	sys.stopOnCall = o.stopOnCall;
+	sys.stubCalls  = o.stubCalls;
+	sys.stubRamp   = o.stubRamp;
 
 	if (!sys.boot(exe.data(), exe.size(), o.boot))
 	{
@@ -223,6 +239,24 @@ int main(int argc, char** argv)
 	            (unsigned long long)s.frames, (unsigned long long)s.instructions,
 	            (unsigned long long)s.cpuCycles, System::stopReasonName(s.reason), sys.bus.cpu.pc);
 
+	if (sys.logCalls)
+	{
+		std::printf("BIOS-area calls: %llu in total, %zu distinct targets\n",
+		            (unsigned long long)sys.totalCalls(), sys.callStats().size());
+		for (const System::CallStat& c : sys.callStats())
+			std::printf("  0x%08X  x%-6llu first at instr %llu (frame %llu) from 0x%08X  r4-r7 = %08X %08X %08X %08X\n",
+			            c.target, (unsigned long long)c.count, (unsigned long long)c.first.instruction,
+			            (unsigned long long)c.first.frame, c.first.caller,
+			            c.first.args[0], c.first.args[1], c.first.args[2], c.first.args[3]);
+		const auto& seq = sys.callSequence();
+		const size_t shown = seq.size() < 40 ? seq.size() : 40;
+		if (shown)
+			std::printf("call sequence (first %zu of %llu):\n", shown, (unsigned long long)sys.totalCalls());
+		for (size_t i = 0; i < shown; ++i)
+			std::printf("  #%-3zu 0x%08X from 0x%08X  r4=%08X r5=%08X  instr %llu\n", i, seq[i].target, seq[i].caller,
+			            seq[i].args[0], seq[i].args[1], (unsigned long long)seq[i].instruction);
+	}
+
 	const std::string faults = formatFaultEvents(sys.bus.cpu);
 	if (!faults.empty())
 		std::printf("fault events:\n%s", faults.c_str());
@@ -232,5 +266,6 @@ int main(int argc, char** argv)
 	if (!unmapped.empty())
 		std::printf("unmapped accesses (busiest pages):\n%s", unmapped.c_str());
 
-	return (s.reason == System::StopReason::FrameLimit || s.reason == System::StopReason::InstructionLimit) ? 0 : 3;
+	return (s.reason == System::StopReason::FrameLimit || s.reason == System::StopReason::InstructionLimit ||
+	        s.reason == System::StopReason::BiosCall) ? 0 : 3;
 }
