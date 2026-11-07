@@ -40,13 +40,13 @@ TEST_F(CPUFixture, ORX_CU_ClearsZFlagWhenResultNonZero)
     EXPECT_EQ(getFlag(spg290::Z), 0);
 }
 
-// N flag — same inverted convention as ANDX: N set when bit 31 == 0
-TEST_F(CPUFixture, ORX_CU_NFlagSetWhenMSBisClear)
+// N flag: PDF "N = R[31]" (corrected in story 17, see test_and_instructions.cpp)
+TEST_F(CPUFixture, ORX_CU_NFlagClearWhenMSBisClear)
 {
     setReg(10, 0x7FFFFFFFu);
     setReg(11, 0x00000000u);
     execute(encodeORX(12, 10, 11, true));
-    EXPECT_EQ(getFlag(spg290::N), 1); // bit 31 == 0 → N set per current impl
+    EXPECT_EQ(getFlag(spg290::N), 0); // bit 31 == 0
 }
 
 TEST_F(CPUFixture, ORX_NoCU_FlagsUntouched)

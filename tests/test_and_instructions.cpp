@@ -51,24 +51,23 @@ TEST_F(CPUFixture, ANDX_NoCU_FlagsUntouched)
     EXPECT_EQ(getFlag(spg290::N), 0);       // N must still be clear
 }
 
-// N flag — NOTE: the current implementation sets N when bit 31 == 0
-// (i.e. N is set for non-negative results). This is inverted from
-// typical CPU convention and may be a bug, but the test documents
-// the actual behaviour.
-TEST_F(CPUFixture, ANDX_CU_NFlagSetWhenMSBisClear)
+// N flag: PDF "N = R[31]". (These two tests used to assert the opposite, N set
+// for a non-negative result; that contradicted the PDF and broke the 3D wire
+// frame demo's soft-float, so they were corrected in story 17.)
+TEST_F(CPUFixture, ANDX_CU_NFlagClearWhenMSBisClear)
 {
     setReg(10, 0x7FFFFFFFu); // bit 31 clear
     setReg(11, 0x7FFFFFFFu);
     execute(encodeANDX(12, 10, 11, true));
-    EXPECT_EQ(getFlag(spg290::N), 1); // N set because (result >> 31) == 0
+    EXPECT_EQ(getFlag(spg290::N), 0); // bit 31 of the result is 0
 }
 
-TEST_F(CPUFixture, ANDX_CU_NFlagClearWhenMSBisSet)
+TEST_F(CPUFixture, ANDX_CU_NFlagSetWhenMSBisSet)
 {
     setReg(10, 0xFFFFFFFFu); // bit 31 set
     setReg(11, 0xFFFFFFFFu);
     execute(encodeANDX(12, 10, 11, true));
-    EXPECT_EQ(getFlag(spg290::N), 0); // N clear because (result >> 31) == 1
+    EXPECT_EQ(getFlag(spg290::N), 1); // bit 31 of the result is 1
 }
 
 // Verifies the exact instruction word from main.cpp decodes identically

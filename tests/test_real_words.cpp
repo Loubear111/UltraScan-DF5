@@ -95,6 +95,49 @@ TEST_F(CPUFixture, MvCond_Ec14_IsNoOp)
     EXPECT_EQ(getReg(1), 7u);
 }
 
+// EC 14 on a branch is "CNT > 0, then CNT--" (CNT is sr0). The 3D wire frame demo
+// zeroes memory and walks its vertex array with `mtsr rN, sr0` + `bcnz`.
+TEST_F(CPUFixture, Bcnz_LoopsCntPlusOneTimes)
+{
+    bus.cpu.sr[0] = 2;                       // n - 1 for three passes
+    int passes = 1;
+    for (;;)
+    {
+        bus.cpu.pc = 0x40;
+        execute(encodeBCOND(14, -4));        // back to 0x38
+        if (bus.cpu.pc == 0x44u)
+            break;
+        EXPECT_EQ(bus.cpu.pc, 0x38u);
+        ++passes;
+        ASSERT_LT(passes, 10);
+    }
+    EXPECT_EQ(passes, 3);
+    EXPECT_EQ(bus.cpu.sr[0], 0u);            // not taken at zero, no wrap
+}
+
+TEST_F(CPUFixture, Bcnz16_UsesAndDecrementsCnt)
+{
+    bus.cpu.sr[0] = 1;
+    bus.cpu.pc = 0x40;
+    execute16(encodeBCOND16(14, -2));
+    EXPECT_EQ(bus.cpu.pc, 0x3Cu);
+    EXPECT_EQ(bus.cpu.sr[0], 0u);
+    bus.cpu.pc = 0x40;
+    execute16(encodeBCOND16(14, -2));
+    EXPECT_EQ(bus.cpu.pc, 0x42u);
+}
+
+TEST_F(CPUFixture, TcntSetsTFromCntWithoutCountingDown)
+{
+    bus.cpu.sr[0] = 3;
+    execute(encodeTCOND(14));
+    EXPECT_TRUE(bus.cpu.status & spg290::T);
+    EXPECT_EQ(bus.cpu.sr[0], 3u);
+    bus.cpu.sr[0] = 0;
+    execute(encodeTCOND(14));
+    EXPECT_FALSE(bus.cpu.status & spg290::T);
+}
+
 TEST_F(CPUFixture, BitOps32_ClearSetToggle)
 {
     setReg(5, 0xFFu);
@@ -132,4 +175,59 @@ TEST_F(CPUFixture, CoprocessorOpcode_RaisesReservedInstruction)
 {
     execute(0x80008000u | (0x1Fu << 26));
     EXPECT_EQ(bus.cpu.cr[2] & spg290::ECR_CODE_MASK, 9u);
+}
+
+// PDF: add/addc/addi/addis/addri with .c set N = R[31], Z, C = carry out, V = overflow.
+// The 3D wire frame's soft-float rounds with `addi.c r4, 16` and then `addc.c`, so a
+// stale C (or an inverted N) after addi.c corrupts the low word of every double sum.
+TEST_F(CPUFixture, AddiC_SetsCarryNegativeAndOverflowFromTheSum)
+{
+    setReg(4, 0x2DB25B70u);
+    bus.cpu.status |= spg290::C;                    // stale carry from an earlier compare
+    execute(encodeADDIX(4, 16, true));
+    EXPECT_EQ(getReg(4), 0x2DB25B80u);
+    EXPECT_EQ(getFlag(spg290::C), 0);               // no carry out of this add
+    EXPECT_EQ(getFlag(spg290::N), 0);               // positive result
+    EXPECT_EQ(getFlag(spg290::V), 0);
+
+    setReg(4, 0xFFFFFFF8u);
+    execute(encodeADDIX(4, 16, true));              // wraps: carry out, result 8
+    EXPECT_EQ(getReg(4), 8u);
+    EXPECT_EQ(getFlag(spg290::C), 1);
+    EXPECT_EQ(getFlag(spg290::N), 0);
+
+    setReg(4, 0x7FFFFFFFu);
+    execute(encodeADDIX(4, 1, true));               // signed overflow into the sign bit
+    EXPECT_EQ(getFlag(spg290::N), 1);
+    EXPECT_EQ(getFlag(spg290::V), 1);
+    EXPECT_EQ(getFlag(spg290::C), 0);
+}
+
+TEST_F(CPUFixture, AddisC_AndAddriC_SetCarryAndNegative)
+{
+    setReg(4, 0x80000000u);
+    execute(encodeADDISX(4, 0x8000, true));         // 0x80000000 + 0x80000000
+    EXPECT_EQ(getReg(4), 0u);
+    EXPECT_EQ(getFlag(spg290::C), 1);
+    EXPECT_EQ(getFlag(spg290::Z), 1);
+    EXPECT_EQ(getFlag(spg290::V), 1);
+
+    setReg(5, 0x7FFFFFFFu);
+    execute(encodeADDRIX(6, 5, 1, true));
+    EXPECT_EQ(getReg(6), 0x80000000u);
+    EXPECT_EQ(getFlag(spg290::N), 1);
+    EXPECT_EQ(getFlag(spg290::V), 1);
+    EXPECT_EQ(getFlag(spg290::C), 0);
+}
+
+TEST_F(CPUFixture, AddcC_SetsNegativeAndOverflow)
+{
+    setReg(4, 0x7FFFFFFFu);
+    setReg(5, 0u);
+    bus.cpu.status |= spg290::C;
+    execute(encodeADDCX(6, 4, 5, true));            // 0x7FFFFFFF + 0 + 1
+    EXPECT_EQ(getReg(6), 0x80000000u);
+    EXPECT_EQ(getFlag(spg290::N), 1);
+    EXPECT_EQ(getFlag(spg290::V), 1);
+    EXPECT_EQ(getFlag(spg290::C), 0);
 }

@@ -395,9 +395,10 @@ uint8_t spg290::ADDCX()
     // Update flags if CU bit is set
     if (instr & CU_MASK)
     {
-        SetFlag(Z, d == 0);              // Zero flag
-        SetFlag(N, (d >> 31) == 0);      // Negative flag 
-        SetFlag(C, carry_out);           // Carry flag
+        SetFlag(Z, d == 0);
+        SetFlag(N, (d >> 31) & 1);       // N = R[31]
+        SetFlag(C, carry_out);
+        SetFlag(V, ((~(a ^ b) & (a ^ d)) >> 31) & 1);
     }
 
     // Write result to destination register
@@ -423,15 +424,17 @@ uint8_t spg290::ADDIX()
     d_val = regs[d_reg];
 
     // Perform the addition
-    d_val += sign_extended_imm;
+    const uint32_t before = d_val;
+    const uint64_t full = (uint64_t)before + (uint64_t)sign_extended_imm;
+    d_val = (uint32_t)full;
 
-    // Check if the CU bit is set to update condition flags
+    // PDF: N = R[31], Z, C = carry out, V = signed overflow
     if (instr & CU_MASK)
     {
-        // Set Z flag if the result is zero
+        SetFlag(N, (d_val >> 31) & 1);
         SetFlag(Z, d_val == 0);
-        // Set N flag if the result is non-negative (based on MSB)
-        SetFlag(N, (d_val >> 31) == 0);
+        SetFlag(C, (full >> 32) & 1);
+        SetFlag(V, ((~(before ^ sign_extended_imm) & (before ^ d_val)) >> 31) & 1);
     }
 
     // Write the result back to the destination register
@@ -459,15 +462,17 @@ uint8_t spg290::ADDISX()
     uint32_t shifted_imm = (uint32_t)imm16 << 16;
 
     // Perform the addition
-    d_val += shifted_imm;
+    const uint32_t before = d_val;
+    const uint64_t full = (uint64_t)before + (uint64_t)shifted_imm;
+    d_val = (uint32_t)full;
 
-    // Check if the CU bit is set to update condition flags
+    // PDF: N = R[31], Z, C = carry out, V = signed overflow
     if (instr & CU_MASK)
     {
-        // Set Z flag if the result is zero
+        SetFlag(N, (d_val >> 31) & 1);
         SetFlag(Z, d_val == 0);
-        // Set N flag if the result is negative (highest bit is 1)
-        SetFlag(N, (d_val >> 31) != 0);
+        SetFlag(C, (full >> 32) & 1);
+        SetFlag(V, ((~(before ^ shifted_imm) & (before ^ d_val)) >> 31) & 1);
     }
 
     // Write the result back to register rD
@@ -495,13 +500,16 @@ uint8_t spg290::ADDRIX()
     a = regs[a_reg];
 
     // Perform addition: d = a + sign-extended imm14
-    d = a + imm14;
+    const uint64_t full = (uint64_t)a + (uint64_t)(uint32_t)imm14;
+    d = (uint32_t)full;
 
-    // Update condition flags if the CU bit is set
+    // PDF: N = R[31], Z, C = carry out, V = signed overflow
     if (instr & CU_MASK)
     {
-        SetFlag(Z, d == 0);               // Set Z flag if result is zero
-        SetFlag(N, (d >> 31) == 0);       // Set N flag based on sign bit (as per ANDX example)
+        SetFlag(N, (d >> 31) & 1);
+        SetFlag(Z, d == 0);
+        SetFlag(C, (full >> 32) & 1);
+        SetFlag(V, ((~(a ^ (uint32_t)imm14) & (a ^ d)) >> 31) & 1);
     }
 
     // Write the result to destination register rD
@@ -536,7 +544,7 @@ uint8_t spg290::ANDX()
 		// If result is 0, set Z flag bit
 		SetFlag(Z, d == 0);
 		// If result is negative number, set N flag bit
-		SetFlag(N, (d >> 31) == 0);
+		SetFlag(N, (d >> 31) & 1);
 	}
 
 	// write back the result of the operation
@@ -572,7 +580,7 @@ uint8_t spg290::ANDIX()
 		// If result is 0, set Z flag bit
 		SetFlag(Z, d == 0);
 		// If result is negative number, set N flag bit
-		SetFlag(N, (d >> 31) == 0);
+		SetFlag(N, (d >> 31) & 1);
 	}
 	// write back the result of the operation
 	writeReg(d_reg, d);
@@ -607,7 +615,7 @@ uint8_t spg290::ANDISX()
         // If result is 0, set Z flag
         SetFlag(Z, d == 0);
         // If result's MSB is 0, set N flag (following ORX's convention)
-        SetFlag(N, (d >> 31) == 0);
+        SetFlag(N, (d >> 31) & 1);
     }
 
     // Write the result back to rD
@@ -643,7 +651,7 @@ uint8_t spg290::ANDRIX()
 		// If result is 0, set Z flag bit
 		SetFlag(Z, d == 0);
 		// If result is negative number, set N flag bit
-		SetFlag(N, (d >> 31) == 0);
+		SetFlag(N, (d >> 31) & 1);
 	}
 	// write back the result of the operation
 	writeReg(d_reg, d);
@@ -706,7 +714,7 @@ uint8_t spg290::ORX()
     if (instr & CU_MASK)
     {
         SetFlag(Z, d == 0);              // Set Z flag if result is zero
-        SetFlag(N, (d >> 31) == 0);      // Set N flag based on sign bit (matches ANDX logic)
+        SetFlag(N, (d >> 31) & 1);      // Set N flag based on sign bit (matches ANDX logic)
     }
 
     // Write result to destination register
@@ -750,6 +758,23 @@ bool spg290::evalCondition(uint8_t ec)
     case 15: return true;           // AL  : always
     default: return false;
     }
+}
+
+// t{cond} and the branches also know EC 14, "CNT > 0" (CNT is sr0). evalCondition()
+// keeps EC 14 as "no operation", which is what mv{cond} and trap{cond} want.
+bool spg290::testCondition(uint8_t ec)
+{
+    return (ec & 0xF) == 14 ? sr[0] > 0 : evalCondition(ec);
+}
+
+// A branch on EC 14 (bcnz, bcnz!, brcnz!...) is taken while CNT > 0 and counts
+// CNT down when it is taken, so CNT = n - 1 gives n passes through the loop.
+bool spg290::branchTaken(uint8_t ec)
+{
+    const bool taken = testCondition(ec);
+    if (taken && (ec & 0xF) == 14)
+        --sr[0];
+    return taken;
 }
 
 uint8_t spg290::ADDX()
@@ -937,7 +962,7 @@ uint8_t spg290::BR()
     if (instr & CU_MASK)
         writeReg(3, pc);
 
-    if (evalCondition(ec))
+    if (branchTaken(ec))
         pc = target;
     return 1;
 }
@@ -946,7 +971,7 @@ uint8_t spg290::BR()
 uint8_t spg290::TCOND()
 {
     uint8_t ec = (instr >> 10) & 0xF;
-    SetFlag(T, evalCondition(ec));
+    SetFlag(T, testCondition(ec));
     return 1;
 }
 
@@ -1526,7 +1551,7 @@ uint8_t spg290::BCOND()
     uint8_t bc   = (instr >> 10) & 0xF;
     int32_t disp = decodeBCondDisp19(instr);
 
-    if (evalCondition(bc))
+    if (branchTaken(bc))
         pc = (pc - instrSize) + (uint32_t)(disp << 1);
 
     return 1;
@@ -1555,7 +1580,7 @@ uint8_t spg290::BCONDL()
     // advanced). The link is always written, regardless of the condition.
     writeReg(3, pc);
 
-    if (evalCondition(bc))
+    if (branchTaken(bc))
         pc = (pc - instrSize) + (uint32_t)(disp << 1);
 
     return 1;
@@ -1782,16 +1807,16 @@ uint8_t spg290::decode16()
         case 0x2: writeReg((uint8_t)(d + 16), va); break;      // mhfl! r(16+rD) = rA
         case 0x3: writeReg(d, va); break;                      // mv!
         case 0x4:                                              // br{cond}! (EC = rD field)
-            if (evalCondition(d)) pc = va;
+            if (branchTaken(d)) pc = va;
             break;
-        case 0x5: SetFlag(T, evalCondition(d)); break;         // t{cond}! (EC = rD field)
+        case 0x5: SetFlag(T, testCondition(d)); break;         // t{cond}! (EC = rD field)
         case 0x8: shift16(d, vd, va, 0); break;                // sll!
         case 0x9: { add16(d, vd, va, GetFlag(C)); break; }     // addc!
         case 0xA: shift16(d, vd, va, 1); break;                // srl!
         case 0xB: shift16(d, vd, va, 2); break;                // sra!
         case 0xC:                                              // brl{cond}!: r3 always written
             writeReg(3, pc);
-            if (evalCondition(d)) pc = va;
+            if (branchTaken(d)) pc = va;
             break;
         default: unimplemented("16-bit OP 0 func4"); break;
         }
@@ -1843,7 +1868,7 @@ uint8_t spg290::decode16()
     case 0x4: // OP 4: b{cond}!  EC[11:8] Disp8[7:0]
     {
         int32_t disp = (int8_t)(w & 0xFF);
-        if (evalCondition((w >> 8) & 0xF))
+        if (branchTaken((w >> 8) & 0xF))
             pc = (pc - instrSize) + (uint32_t)(disp << 1);
         break;
     }

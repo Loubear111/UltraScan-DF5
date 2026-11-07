@@ -372,6 +372,8 @@ private:
 
 	// Shared helper: evaluate a 4-bit execution condition against the flags.
 	bool evalCondition(uint8_t ec);
+	bool testCondition(uint8_t ec);   // evalCondition plus EC 14 = (CNT > 0)
+	bool branchTaken(uint8_t ec);     // testCondition, and CNT-- when an EC 14 branch is taken
 
 	/* OPCODES */
 	uint8_t ADDCX();
