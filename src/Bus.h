@@ -9,6 +9,7 @@
 #include "ppu.h"
 #include "IRQController.h"
 #include "TVE.h"
+#include "VideoTiming.h"
 
 class Bus
 {
@@ -54,6 +55,9 @@ public: // Devices on bus
 
 	// TV encoder / framebuffer scan-out registers (see TVE.h for the addresses).
 	TVE tve;
+
+	// Scanline counter that drives the PPU vblank / H-V events.
+	VideoTiming video;
 
 	// RAM region, byte-addressed starting at address 0 and mirrored through
 	// the whole physical range below RAM_LIMIT (index = addr & (size - 1)).
@@ -109,6 +113,16 @@ public: // Bus read/write, byte-addressed across the full 32-bit space.
 	// automatically after MMIO writes; call it after raising a PPU event hook.
 	void updateIRQ();
 
+	// Advance video time by `cpuCycles` CPU cycles and raise the PPU vblank /
+	// H-V events that fall inside. Runs even while the CPU sleeps, so a sleeping
+	// core can be woken by an interrupt.
+	void tick(uint32_t cpuCycles);
+
+	// True once per vblank start; reading it clears it. The driver renders a
+	// frame when it is set.
+	bool takeFrameReady() { bool r = frameReady; frameReady = false; return r; }
+	bool frameReady = false;
+
 	// Unmapped-access log: reads and writes per 4 KiB physical page that no
 	// region owns. Shows which I/O a program touches that is not modelled yet.
 	struct UnmappedPage
@@ -157,4 +171,19 @@ private:
 	// registers where only the written lane may carry bits.
 	void     mmioWriteLane(uint32_t phys, uint32_t data, uint32_t laneMask, unsigned shift);
 	static bool isLaneOnlyReg(uint32_t phys);
+};
+
+// PPUMemory view of the bus. The PPU's byte order is fixed (little-endian, PPU
+// manual 9.1), so halfwords and words are composed from byte reads whatever the
+// Bus byte order is; the CPU/Bus byte-order question stays inside the Bus.
+class BusMemory : public PPUMemory
+{
+public:
+	explicit BusMemory(const Bus& b) : bus(b) {}
+	uint8_t  readByte(uint32_t a) const override { return bus.read8(a); }
+	uint16_t readHalf(uint32_t a) const override { return (uint16_t)(readByte(a) | (readByte(a + 1) << 8)); }
+	uint32_t readWord(uint32_t a) const override { return (uint32_t)readHalf(a) | ((uint32_t)readHalf(a + 2) << 16); }
+
+private:
+	const Bus& bus;
 };

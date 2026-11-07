@@ -128,6 +128,15 @@ public:
 
 	void clock();
 
+	// Power-on state: every register, control/special/coprocessor register, the
+	// condition flags, sleep state, IRQ input and fault diagnostics are cleared
+	// (the diagnostic switches such as stop-on-unimplemented stay as set), then
+	// the PC is loaded. RESET_PC is the MAME-era placeholder; s_core7.pdf
+	// documents no reset vector (its 0xFF00_0000 is the ICE debug target), so
+	// callers that boot a program pass the real entry PC.
+	static constexpr uint32_t RESET_PC = 0xFF000000u;
+	void reset(uint32_t resetPc = RESET_PC);
+
 	// What the last fetch produced: the instruction word (a 16-bit or 15-bit
 	// payload sits in the low bits) and its size in bytes (2, or 4 for a 32-bit
 	// instruction, a parallel pair or an invalid word). Read-only, for tests.

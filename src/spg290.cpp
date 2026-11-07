@@ -281,6 +281,30 @@ void spg290::clock()
 	cycles--;
 }
 
+void spg290::reset(uint32_t resetPc)
+{
+	for (uint32_t& r : regs) r = 0;
+	for (uint32_t& r : cr)   r = 0;
+	for (uint32_t& r : sr)   r = 0;
+	for (auto& bank : copData) for (uint32_t& r : bank) r = 0;
+	for (auto& bank : copCtrl) for (uint32_t& r : bank) r = 0;
+	ceh = cel = 0;
+	status = 0;
+	cycles = 0;
+	instr = 0;
+	instrSize = 4;
+	halted = false;
+	irqLevel = false;
+	irqVector = 0;
+	instrAddr = 0;
+	stopFlag = false;
+	hang = false;
+	selfLoopCount = 0;
+	faults.clear();
+	trace.clear();
+	pc = resetPc;
+}
+
 // ---- Fault diagnostics ---------------------------------------------
 // One funnel for undefined and not-yet-implemented encodings. The event is
 // recorded (ring of the last FAULT_EVENT_CAP) and the architectural

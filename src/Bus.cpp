@@ -253,6 +253,18 @@ void Bus::updateIRQ()
 	cpu.setIRQ(irqc.irqActive(), irqc.activeVector());
 }
 
+void Bus::tick(uint32_t cpuCycles)
+{
+	const uint32_t ev = video.advance(cpuCycles, ppu.read32(PPU::P_IRQTMV), ppu.read32(PPU::P_IRQTMH),
+	                                  ppu.read32(PPU::P_VBLK_TIME));
+	if (!ev)
+		return;
+	if (ev & VideoTiming::EV_VBLANK_START) { ppu.signalVBlankStart(); frameReady = true; }
+	if (ev & VideoTiming::EV_VBLANK_END)   ppu.signalVBlankEnd();
+	if (ev & VideoTiming::EV_HV_HIT)       ppu.signalHVHit();
+	updateIRQ();
+}
+
 // ---- Public accessors (byte order selected by setLittleEndian()) ---------
 uint8_t Bus::read8(uint32_t addr) const
 {

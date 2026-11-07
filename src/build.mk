@@ -26,7 +26,7 @@ SDIS_DIR       = ../tools/sdis
 SDIS_LIB_OBJS  = $(SDIS_DIR)/scoredsm.o $(SDIS_DIR)/score_disasm.o
 
 #all objects 
-OBJS = main.o Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o TVE.o Boot.o
+OBJS = main.o Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o TVE.o Boot.o System.o
 
 # Default target
 all: $(TARGET)
@@ -36,7 +36,11 @@ $(TARGET): $(OBJS) $(SDIS_LIB_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 # compile main
-main.o: main.cpp Bus.o spg290.o
+main.o: main.cpp System.o
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# compile system (run loop)
+System.o: System.cpp System.h Boot.h Bus.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # compile spg290
@@ -88,7 +92,7 @@ $(TEST_OBJS): $(wildcard ../tests/roms/generated/*.h)
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
 
-$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o TVE.o Boot.o $(SDIS_LIB_OBJS) $(TEST_OBJS)
+$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o TVE.o Boot.o System.o $(SDIS_LIB_OBJS) $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 # Compile test sources with -I. so they can find Bus.h / spg290.h (and -I$(SDIS_DIR) for score_disasm.h)
