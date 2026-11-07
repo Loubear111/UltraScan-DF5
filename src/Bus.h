@@ -8,6 +8,7 @@
 #include "spg290.h"
 #include "ppu.h"
 #include "IRQController.h"
+#include "TVE.h"
 
 class Bus
 {
@@ -50,6 +51,9 @@ public: // Devices on bus
 
 	// Peripheral interrupt controller (IRQController::BASE = 0x880A_0000).
 	IRQController irqc;
+
+	// TV encoder / framebuffer scan-out registers (see TVE.h for the addresses).
+	TVE tve;
 
 	// RAM region, byte-addressed starting at address 0 and mirrored through
 	// the whole physical range below RAM_LIMIT (index = addr & (size - 1)).
@@ -129,6 +133,7 @@ private:
 	static bool inPPU(uint32_t p)  { return p >= PPU_PHYS  && p < PPU_PHYS  + 0x10000u; }
 	static bool inIRQC(uint32_t p) { return p >= IRQC_PHYS && p < IRQC_PHYS + IRQController::WINDOW; }
 	static bool inRom(uint32_t p)  { return p >= ROM_PHYS  && p < ROM_PHYS  + ROM_WINDOW; }
+	static bool inTve(uint32_t p)   { return TVE::owns(p & ~3u); }
 	static bool inMiu(uint32_t p)   { return p >= (MIU_STATUS & ~3u) && p < (MIU_STATUS & ~3u) + 4u; }
 	static bool inDummy(uint32_t p) { return p >= DUMMY_PHYS && p < DUMMY_PHYS + DUMMY_SIZE; }
 

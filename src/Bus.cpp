@@ -113,7 +113,7 @@ Bus::Region Bus::classify(uint32_t p) const
 	if (p < RAM_LIMIT)                                  return Region::Ram;
 	if (p >= SRAM_PHYS && p < SRAM_PHYS + SRAM_SIZE)    return Region::Sram;
 	if (inRom(p))                                       return Region::Rom;
-	if (inPPU(p) || inIRQC(p) || inMiu(p) || inDummy(p)) return Region::Device;
+	if (inPPU(p) || inIRQC(p) || inTve(p) || inMiu(p) || inDummy(p)) return Region::Device;
 	return Region::None;
 }
 
@@ -211,6 +211,8 @@ uint32_t Bus::mmioRead32(uint32_t phys) const
 		return ppu.read32(PPU::BASE + (phys - PPU_PHYS));
 	if (inIRQC(phys))
 		return irqc.read32(phys - IRQC_PHYS);
+	if (TVE::owns(phys))
+		return tve.read32(phys);
 	if (phys == MIU_STATUS)
 		return 1;
 	return 0;   // the small dummy window reads 0
@@ -222,6 +224,8 @@ void Bus::mmioWrite32(uint32_t phys, uint32_t data)
 		ppu.write32(PPU::BASE + (phys - PPU_PHYS), data);
 	else if (inIRQC(phys))
 		irqc.write32(phys - IRQC_PHYS, data);
+	else if (TVE::owns(phys))
+		tve.write32(phys, data);
 	else
 		return;   // MIU status and the dummy window ignore writes
 	updateIRQ();

@@ -26,7 +26,7 @@ SDIS_DIR       = ../tools/sdis
 SDIS_LIB_OBJS  = $(SDIS_DIR)/scoredsm.o $(SDIS_DIR)/score_disasm.o
 
 #all objects 
-OBJS = main.o Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o
+OBJS = main.o Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o TVE.o
 
 # Default target
 all: $(TARGET)
@@ -88,7 +88,7 @@ $(TEST_OBJS): $(wildcard ../tests/roms/generated/*.h)
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
 
-$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o $(SDIS_LIB_OBJS) $(TEST_OBJS)
+$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o TVE.o $(SDIS_LIB_OBJS) $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 # Compile test sources with -I. so they can find Bus.h / spg290.h (and -I$(SDIS_DIR) for score_disasm.h)
