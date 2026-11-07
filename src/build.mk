@@ -21,14 +21,18 @@ endif
 #target exe
 TARGET = main
 
+# S+core7 disassembler objects (also linked into main for fault reports and into the tests)
+SDIS_DIR       = ../tools/sdis
+SDIS_LIB_OBJS  = $(SDIS_DIR)/scoredsm.o $(SDIS_DIR)/score_disasm.o
+
 #all objects 
-OBJS = main.o Bus.o spg290.o ppu.o IRQController.o DiscImage.o
+OBJS = main.o Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o
 
 # Default target
 all: $(TARGET)
 
 # Link the files
-$(TARGET): $(OBJS)
+$(TARGET): $(OBJS) $(SDIS_LIB_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 # compile main
@@ -38,6 +42,10 @@ main.o: main.cpp Bus.o spg290.o
 # compile spg290
 spg290.o: spg290.cpp Bus.o 
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# fault report (uses the S+core7 disassembler)
+FaultReport.o: FaultReport.cpp FaultReport.h spg290.h $(SDIS_DIR)/score_disasm.h
+	$(CXX) $(CXXFLAGS) -I$(SDIS_DIR) -c $< -o $@
 
 # compile bus
 Bus.o: Bus.cpp Bus.h ppu.o IRQController.o
@@ -65,8 +73,6 @@ clean:
 # Usage: make -f build.mk test
 # ----------------------------------------------------------------
 # The conformance test links MAME's S+core7 disassembler as an independent decoder.
-SDIS_DIR       = ../tools/sdis
-SDIS_LIB_OBJS  = $(SDIS_DIR)/scoredsm.o $(SDIS_DIR)/score_disasm.o
 
 TEST_SRCS  = $(wildcard ../tests/*.cpp)
 TEST_OBJS  = $(patsubst ../tests/%.cpp, ../tests/%.o, $(TEST_SRCS))
@@ -82,7 +88,7 @@ $(TEST_OBJS): $(wildcard ../tests/roms/generated/*.h)
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
 
-$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o DiscImage.o $(SDIS_LIB_OBJS) $(TEST_OBJS)
+$(TEST_TARGET): Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o $(SDIS_LIB_OBJS) $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 # Compile test sources with -I. so they can find Bus.h / spg290.h (and -I$(SDIS_DIR) for score_disasm.h)

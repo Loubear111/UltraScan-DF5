@@ -95,12 +95,16 @@ void spg290::clock()
 		const bool p15 = (w & 0x00008000u) != 0;
 		const bool aligned = (pc & 2u) == 0;
 
+		instrAddr = pc;
+
 		if (!aligned || (!p31 && !p15))
 		{
 			instr = readHalf(pc);   // decode16() reads this from the low 16 bits
 			instrSize = 2;
 			pc += 2;
+			recordTrace();
 			decode16();
+			instructionDone();
 			return;
 		}
 
@@ -109,6 +113,8 @@ void spg290::clock()
 
 		if (!p31)   // 0/1
 		{
+			instr = w;
+			recordTrace();
 			raiseException(EXC_PEL);
 			return;
 		}
@@ -116,11 +122,14 @@ void spg290::clock()
 		if (!p15)   // 1/0: both halves are 15-bit instructions, decoded as 16-bit with P = 0
 		{
 			instr = GetFlag(T) ? (w & 0x7FFFu) : ((w >> 16) & 0x7FFFu);
+			recordTrace();
 			decode16();
+			instructionDone();
 			return;
 		}
 
 		instr = w;
+		recordTrace();
 
 		// Extract opcode from instruction word
 		// opcode is bits 30-26 so we must shift it over after masking
@@ -209,7 +218,7 @@ void spg290::clock()
 				}
 				else MTCEL();
 				break;
-			default: raiseException(EXC_RI); break;   // 06 07 0E 19 26 27 32 36 39
+			default: unimplemented("special func6"); break;   // 06 07 0E 19 26 27 32 36 39
 			}
 			break;
 		}
@@ -223,7 +232,7 @@ void spg290::clock()
 			case F3_CMPI:   CMPI();   break;
 			case F3_LDI:    LDI();    break;  // ldi:  func3=6
 			case F3_ANDIX:  ANDIX();  break;  // andi: func3=4
-			default: break;
+			default: unimplemented("I-form func3"); break;
 			}
 			break;
 		}
@@ -237,7 +246,7 @@ void spg290::clock()
 			case F3_ANDISX: ANDISX(); break;  // andis: func3=4
 			case F3_ORISX:  ORISX();  break;  // oris:  func3=5
 			case F3_LDISX:  LDIS();   break;  // ldis:  func3=6, confirmed via score-elf-as
-			default: raiseException(EXC_RI); break;
+			default: unimplemented("I-form (opcode 5) func3"); break;
 			}
 			break;
 		}
@@ -259,8 +268,10 @@ void spg290::clock()
 		case OP_RIX_PRE:  RIX(true);  break;   // pre-index:  rA += imm12, then access [rA]
 		case OP_RIX_POST: RIX(false); break;   // post-index: access [rA], then rA += imm12
 		case OP_CACHE:    break;               // cache: no-op
-		default: raiseException(EXC_RI); break; // 0x1C (custom engine), coprocessor forms and the rest
+		default: unimplemented("opcode"); break;   // 0x1C (custom engine), coprocessor forms and the rest
 		}
+
+		instructionDone();
 
 		// Just setting cycle per instruction to 1 for all instructions for now
 		// This will need to be changed later to by cycle accurate
@@ -268,6 +279,68 @@ void spg290::clock()
 	}
 
 	cycles--;
+}
+
+// ---- Fault diagnostics ---------------------------------------------
+// One funnel for undefined and not-yet-implemented encodings. The event is
+// recorded (ring of the last FAULT_EVENT_CAP) and the architectural
+// reserved-instruction exception is raised, unless stop-on-unimplemented is
+// on, in which case the CPU asks its driver to stop instead.
+void spg290::unimplemented(const char* what)
+{
+    recordFault(FaultEvent::Unimplemented, what);
+    if (stopOnUnimpl)
+        stopFlag = true;
+    else
+        raiseException(EXC_RI);
+}
+
+void spg290::recordFault(FaultEvent::Kind kind, const char* what)
+{
+    FaultEvent e;
+    e.kind  = kind;
+    e.pc    = instrAddr;
+    e.word  = instr;
+    e.cause = cr[2];
+    e.what  = what;
+    faults.push_back(e);
+    if (faults.size() > FAULT_EVENT_CAP)
+        faults.pop_front();
+}
+
+// Called after every executed instruction. A run of instructions that each
+// leave the PC where it started (b! / j to itself) is a hang: in the demos every
+// exception vector leads to such a loop, so this reports the last cause.
+void spg290::instructionDone()
+{
+    if (pc != instrAddr)
+    {
+        selfLoopCount = 0;
+        return;
+    }
+    if (hangThreshold != 0 && ++selfLoopCount == hangThreshold)
+    {
+        hang = true;
+        recordFault(FaultEvent::Hang, "branch to self");
+        if (stopOnHang)
+            stopFlag = true;
+    }
+}
+
+void spg290::recordTrace()
+{
+    if (traceDepth == 0)
+        return;
+    trace.push_back({ instrAddr, instr, instrSize });
+    if (trace.size() > traceDepth)
+        trace.pop_front();
+}
+
+void spg290::setTraceDepth(size_t n)
+{
+    traceDepth = n;
+    while (trace.size() > n)
+        trace.pop_front();
 }
 
 uint8_t spg290::ADDCX()
@@ -1696,7 +1769,7 @@ uint8_t spg290::decode16()
             writeReg(3, pc);
             if (evalCondition(d)) pc = va;
             break;
-        default: raiseException(EXC_RI); break;
+        default: unimplemented("16-bit OP 0 func4"); break;
         }
         break;
     }
@@ -1787,11 +1860,11 @@ uint8_t spg290::decode16()
         case 4: writeWord(bp + (imm5 << 2), regs[d]); break;                                        // swp!
         case 5: writeHalf(bp + (imm5 << 1), (uint16_t)regs[d]); break;                              // shp!
         case 7: writeByte(bp + imm5, (uint8_t)regs[d]); break;                                      // sbp!
-        default: raiseException(EXC_RI); break;
+        default: unimplemented("16-bit OP 7 func3"); break;
         }
         break;
     }
-    default: raiseException(EXC_RI); break;   // OP 1 is undefined
+    default: unimplemented("16-bit OP 1"); break;   // OP 1 is undefined
     }
 
     return 1;

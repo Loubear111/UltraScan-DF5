@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <vector>
 #include <stdint.h>
 #include <string>
@@ -44,6 +45,42 @@ public:
 	static constexpr uint32_t ECR_CODE_MASK     = 0x1Fu;
 	static constexpr uint32_t ECR_VECTOR_SHIFT  = 18;
 	static constexpr uint32_t ECR_VECTOR_MASK   = 0x3Fu << ECR_VECTOR_SHIFT;
+
+	// ---- Fault diagnostics ----------------------------------------------
+	// Undefined and not-yet-implemented encodings go through one funnel that
+	// records an event and then raises the reserved-instruction exception (or,
+	// with stop-on-unimplemented, asks the driver to stop). A run of
+	// instructions that branch to themselves is recorded as a Hang event.
+	struct FaultEvent
+	{
+		enum Kind { Unimplemented, Hang };
+		Kind        kind;
+		uint32_t    pc;      // address of the instruction
+		uint32_t    word;    // raw word (a 16-bit instruction or pair half sits in the low bits)
+		uint32_t    cause;   // ECR (cr2) when the event was recorded
+		std::string what;
+	};
+	struct TraceEntry
+	{
+		uint32_t pc;
+		uint32_t word;
+		uint8_t  size;       // 2 or 4
+	};
+	static constexpr size_t FAULT_EVENT_CAP = 64;
+
+	void setStopOnUnimplemented(bool on) { stopOnUnimpl = on; }
+	void setStopOnHang(bool on)          { stopOnHang = on; }
+	// Consecutive self-branching instructions that count as a hang (0 disables).
+	void setHangThreshold(uint32_t n)    { hangThreshold = n; selfLoopCount = 0; }
+	bool stopRequested() const           { return stopFlag; }
+	bool hangDetected() const            { return hang; }
+	void clearStop()                     { stopFlag = false; hang = false; selfLoopCount = 0; }
+	// Last FAULT_EVENT_CAP events, oldest first.
+	std::vector<FaultEvent> faultEvents() const { return std::vector<FaultEvent>(faults.begin(), faults.end()); }
+
+	// Keep the last n executed instructions (0 = off).
+	void setTraceDepth(size_t n);
+	std::vector<TraceEntry> traceEntries() const { return std::vector<TraceEntry>(trace.begin(), trace.end()); }
 
 	// Drive the core's single IRQ input. `vector` is the controller-supplied
 	// vector number (0..63) and is sampled when the interrupt is taken.
@@ -127,6 +164,22 @@ private:
 	bool     irqLevel  = false;
 	uint8_t  irqVector = 0;
 	bool     halted    = false;
+
+	// Fault diagnostics state (see the public API above).
+	uint32_t instrAddr = 0;            // address of the instruction being executed
+	bool     stopOnUnimpl = false;
+	bool     stopOnHang   = false;
+	bool     stopFlag     = false;
+	bool     hang         = false;
+	uint32_t hangThreshold = 16;
+	uint32_t selfLoopCount = 0;
+	std::deque<FaultEvent> faults;
+	size_t   traceDepth = 0;
+	std::deque<TraceEntry> trace;
+	void unimplemented(const char* what);
+	void recordFault(FaultEvent::Kind kind, const char* what);
+	void instructionDone();
+	void recordTrace();
 
 	struct INSTRUCTION
 	{
