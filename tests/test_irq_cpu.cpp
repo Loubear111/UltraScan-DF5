@@ -6,11 +6,12 @@
 // sleep, and the real GAS-assembled CR-form encodings.
 // ============================================================
 
-static constexpr uint32_t VEC_BASE = 0x1000;
-// 16-byte spacing: irq(n) = base + 0x200 + 0x10*(n+1)
-static constexpr uint32_t VEC53_MODE16 = VEC_BASE + 0x200 + 0x10 * 54;
-// 4-byte spacing
-static constexpr uint32_t VEC53_MODE4  = VEC_BASE + 0x200 + 0x04 * 54;
+// The vector base is cr3[31:16], so it must be 64 KiB aligned.
+static constexpr uint32_t VEC_BASE = 0x10000;
+// 16-byte spacing: irq(n) = base + 0x200 + (n << 4)
+static constexpr uint32_t VEC53_MODE16 = VEC_BASE + 0x200 + 0x10 * 53;   // base + 0x550
+// 4-byte spacing: irq(n) = base + 0x200 + (n << 2)
+static constexpr uint32_t VEC53_MODE4  = VEC_BASE + 0x200 + 0x04 * 53;   // base + 0x2D4
 
 static uint32_t ecrVector(const spg290 &cpu)
 {
@@ -146,5 +147,5 @@ TEST_F(CPUFixture, VectorAddress_Helpers)
 {
     bus.cpu.cr[3] = 0xA0000001u;
     EXPECT_EQ(bus.cpu.generalVectorAddr(), 0xA0000200u);
-    EXPECT_EQ(bus.cpu.irqVectorAddr(53), 0xA0000200u + 0x10u * 54u);
+    EXPECT_EQ(bus.cpu.irqVectorAddr(53), 0xA0000200u + 0x10u * 53u);
 }

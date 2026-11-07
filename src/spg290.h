@@ -18,14 +18,14 @@ public:
 
 	enum FLAGS290
 	{
-		// Emulator-internal condition flags (the real Condition register, cr1,
-		// has unknown bit positions; mfcr/mtcr cr1 read/write this word).
-		// Interrupt enable lives in PSR (cr0), not here.
-		C = (1 << 0),	// Carry Bit
-		Z = (1 << 1),	// Zero
-		V = (1 << 6),	// Overflow
-		N = (1 << 7),	// Negative
-		T = (1 << 8),	// T (true) condition flag, set by cmp{TCS}.c / cmpz{TCS}.c
+		// Condition register (cr1) bits [MAME]. cr1[4:0] holds the live flags and
+		// cr1[9:5] the copy saved on exception entry and restored by rte.
+		// mfcr/mtcr cr1 read/write this word. Interrupt enable lives in PSR (cr0).
+		V = (1 << 0),	// Overflow
+		C = (1 << 1),	// Carry Bit
+		Z = (1 << 2),	// Zero
+		N = (1 << 3),	// Negative
+		T = (1 << 4),	// T (true) condition flag, set by cmp{TCS}.c / cmpz{TCS}.c
 	};
 
 	// Processor Status Register (cr0). IEc is confirmed (Linux score port);
@@ -50,8 +50,9 @@ public:
 	void setIRQ(bool level, uint8_t vector) { irqLevel = level; irqVector = vector & 0x3F; }
 	bool isHalted() const { return halted; }
 
-	// Entry addresses derived from EXCPvec (cr3): bit 0 selects 16-byte (1)
-	// or 4-byte (0) vector spacing.
+	// Entry addresses derived from EXCPvec (cr3) [MAME]: the base is cr3[31:16],
+	// the general vector is base + 0x200 and IRQ n is general + (n << 2), or
+	// (n << 4) when cr3 bit 0 is set.
 	uint32_t generalVectorAddr() const;
 	uint32_t irqVectorAddr(uint8_t vector) const;
 
@@ -83,7 +84,7 @@ public:
 	// program counter, 32 bits
 	uint32_t pc = 0x00000000;
 
-	// status register (widened to 32 bits so the T flag at bit 8 fits)
+	// Condition register cr1 (flags in [4:0], saved flags in [9:5])
 	uint32_t status = 0x00;
 
 	uint8_t GetFlag(FLAGS290 f);
@@ -126,8 +127,6 @@ private:
 	bool     irqLevel  = false;
 	uint8_t  irqVector = 0;
 	bool     halted    = false;
-	// Condition flags saved on exception entry and restored by rte.
-	uint32_t condSaved = 0;
 
 	struct INSTRUCTION
 	{
@@ -264,6 +263,7 @@ private:
 	enum EXC_CODE
 	{
 		EXC_NMI       = 1,
+		EXC_INT       = 20,   // hardware interrupt; the source goes in ECR[23:18] [MAME]
 		EXC_ADEL_INSN = 2,
 		EXC_IBE       = 5,
 		EXC_PEL       = 6,

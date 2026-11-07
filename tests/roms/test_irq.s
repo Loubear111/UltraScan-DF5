@@ -6,12 +6,12 @@
  * immediates so GAS never picks a 16-bit "!" form; r30/r31 are handler scratch.
  *
  * Flow:
- *   EXCPvec = 0x1001 (base 0x1000, 16-byte spacing)
+ *   EXCPvec = 0x1 (base 0, 16-byte spacing; the base is cr3[31:16])
  *   PPU BLK_ST_EN on, interrupt controller source 10 unmasked, PSR.IEc on.
  *   The test harness raises a vblank periodically; the IRQ-53 handler at
- *   base + 0x200 + 0x10*54 = 0x1560 counts it at 0x2000 and acknowledges the
+ *   base + 0x200 + (53 << 4) = 0x550 counts it at 0x2000 and acknowledges the
  *   PPU status. Main spins until the count reaches 3, then executes syscall.
- *   The general handler at 0x1200 stores ECR to 0x2004, skips the syscall, rte.
+ *   The general handler at 0x200 stores ECR to 0x2004, skips the syscall, rte.
  *   Main then reports through the ROM protocol; the C++ test checks the saved
  *   ECR. The real GAS J-form and forward B-form displacements are not decoded
  *   correctly by the emulator yet, so only a short backward bne is native here
@@ -24,7 +24,7 @@
     .align 2
 
 start:
-    li      r16, 0x1001
+    li      r16, 0x1
     mtcr    r16, cr3
     li      r17, 0x88010080         /* P_IRQ_Control */
     ldi     r18, 1                  /* BLK_ST_EN */
@@ -55,7 +55,7 @@ wait:
 halt:
     j_e     0x80                    /* jump to self (byte 0x100) */
 
-    .org 0x1200
+    .org 0x200
 general_handler:
     mfcr    r31, cr2
     li      r30, 0x2000
@@ -65,7 +65,7 @@ general_handler:
     mtcr    r31, cr5
     rte
 
-    .org 0x1560
+    .org 0x550
 irq53_handler:
     li      r30, 0x2000
     lw_e    31, 30, 0

@@ -1833,17 +1833,17 @@ uint8_t spg290::MTSR()
     return 1;
 }
 
-// Vector addresses from EXCPvec (cr3): bit 0 selects 16- vs 4-byte spacing.
-// The general vector is base+0x200; IRQ n follows at base+0x200+spacing*(n+1).
+// Vector addresses from EXCPvec (cr3) [MAME]: base = cr3[31:16]; the general
+// vector is base+0x200 and IRQ n is at general + (n << 2), or (n << 4) when cr3
+// bit 0 is set.
 uint32_t spg290::generalVectorAddr() const
 {
-    return (cr[3] & ~1u) + 0x200u;
+    return (cr[3] & 0xFFFF0000u) + 0x200u;
 }
 
 uint32_t spg290::irqVectorAddr(uint8_t vector) const
 {
-    uint32_t spacing = (cr[3] & 1u) ? 0x10u : 0x04u;
-    return generalVectorAddr() + spacing * ((uint32_t)vector + 1u);
+    return generalVectorAddr() + ((uint32_t)vector << ((cr[3] & 1u) ? 4 : 2));
 }
 
 // Shift the current PSR pair into the saved pair, enter kernel mode with
@@ -1856,7 +1856,7 @@ void spg290::enterException(uint8_t code, uint32_t epc, uint32_t target)
     if (psr & PSR_IEC) next |= PSR_IES;
     cr[0] = next;
 
-    condSaved = status;
+    status = (status & ~0x3E0u) | ((status & 0x1Fu) << 5);   // cr1[9:5] = cr1[4:0]
     cr[2] = (cr[2] & ~ECR_CODE_MASK) | (code & ECR_CODE_MASK);
     cr[5] = epc;
     pc = target;
@@ -1874,7 +1874,7 @@ void spg290::raiseException(uint8_t code)
 void spg290::takeInterrupt()
 {
     uint8_t vector = irqVector;
-    enterException(0, pc, irqVectorAddr(vector));
+    enterException(EXC_INT, pc, irqVectorAddr(vector));
     cr[2] = (cr[2] & ~ECR_VECTOR_MASK) | ((uint32_t)vector << ECR_VECTOR_SHIFT);
 }
 
@@ -1905,7 +1905,7 @@ uint8_t spg290::RTE()
     if (cr[0] & PSR_UMS) psr |= PSR_UMC;
     if (cr[0] & PSR_IES) psr |= PSR_IEC;
     cr[0] = psr;
-    status = condSaved;
+    status = (status & ~0x1Fu) | ((status >> 5) & 0x1Fu);   // cr1[4:0] = cr1[9:5]
     pc = cr[5] & ~1u;
     return 1;
 }

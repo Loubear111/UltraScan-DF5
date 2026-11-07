@@ -44,9 +44,9 @@ TEST_F(CPUFixture, TCOND_Always_SetsT)
 // ---- trap{cond} ----
 TEST_F(CPUFixture, TRAPCOND_Always_VectorsToHandler)
 {
-    bus.cpu.cr[3] = 0x40;             // EXCPvec, 4-byte spacing
+    bus.cpu.cr[3] = 0x10000;          // EXCPvec base 0x10000 (cr3[31:16])
     execute(encodeTRAPCOND(15));      // AL -> always trap
-    EXPECT_EQ(bus.cpu.pc, 0x240u);    // general vector = base + 0x200
+    EXPECT_EQ(bus.cpu.pc, 0x10200u);  // general vector = base + 0x200
     EXPECT_EQ(bus.cpu.cr[2], 10u);    // ECR exc_code = trap
     EXPECT_EQ(bus.cpu.cr[5], 0u);     // EPC = faulting instr (was at pc 0)
 }
@@ -61,10 +61,10 @@ TEST_F(CPUFixture, TRAPCOND_NoOpCode_DoesNotTrap)
 
 TEST_F(CPUFixture, TRAPCOND_EQ_TrapsWhenZeroSet)
 {
-    bus.cpu.cr[3] = 0x50;
+    bus.cpu.cr[3] = 0x10000;
     bus.cpu.status |= spg290::Z;
     execute(encodeTRAPCOND(4));       // EQ
-    EXPECT_EQ(bus.cpu.pc, 0x250u);
+    EXPECT_EQ(bus.cpu.pc, 0x10200u);
     EXPECT_EQ(bus.cpu.cr[2], 10u);
 }
 
@@ -78,9 +78,9 @@ TEST_F(CPUFixture, TRAPCOND_EQ_NoTrapWhenZeroClear)
 // ---- syscall ----
 TEST_F(CPUFixture, SYSCALL_AlwaysTraps)
 {
-    bus.cpu.cr[3] = 0x61;             // 16-byte spacing: mode bit set
+    bus.cpu.cr[3] = 0x10001;          // 16-byte spacing bit set; it does not move the general vector
     execute(encodeSYSCALL());
-    EXPECT_EQ(bus.cpu.pc, 0x260u);    // vectored to base(0x60) + 0x200
+    EXPECT_EQ(bus.cpu.pc, 0x10200u);  // vectored to base(0x10000) + 0x200
     EXPECT_EQ(bus.cpu.cr[2], 7u);     // ECR exc_code = syscall
     EXPECT_EQ(bus.cpu.cr[5], 0u);     // EPC = syscall instruction
 }
@@ -107,7 +107,7 @@ TEST_F(CPUFixture, Exception_RteRestoresPSRAndFlags)
     bus.cpu.cr[0] = spg290::PSR_IEC;
     bus.cpu.status |= spg290::C | spg290::Z;
     execute(encodeSYSCALL());
-    bus.cpu.status = 0;                // handler clobbers the flags
+    bus.cpu.status &= ~0x1Fu;          // handler clobbers the live flags (cr1[4:0])
     execute(encodeRTE());
     EXPECT_NE(bus.cpu.cr[0] & spg290::PSR_IEC, 0u);
     EXPECT_EQ(getFlag(spg290::C), 1u);

@@ -5,8 +5,8 @@
 // PPU -> controller -> CPU path through the bus.
 // ============================================================
 
-static constexpr uint32_t VEC_BASE     = 0x1000;
-static constexpr uint32_t VEC53_MODE16 = VEC_BASE + 0x200 + 0x10 * 54;
+static constexpr uint32_t VEC_BASE     = 0x10000;   // cr3[31:16]
+static constexpr uint32_t VEC53_MODE16 = VEC_BASE + 0x200 + 0x10 * 53;
 
 static constexpr uint32_t PPU_CTRL   = PPU::BASE + PPU::P_IRQ_Control;
 static constexpr uint32_t PPU_STATUS = PPU::BASE + PPU::P_IRQ_Status;

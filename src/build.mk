@@ -72,6 +72,12 @@ TEST_SRCS  = $(wildcard ../tests/*.cpp)
 TEST_OBJS  = $(patsubst ../tests/%.cpp, ../tests/%.o, $(TEST_SRCS))
 TEST_TARGET = ../tests/test_runner
 
+# Any change to a src header rebuilds every object (class layouts are shared).
+HDRS = $(wildcard *.h)
+$(OBJS) $(TEST_OBJS): $(HDRS)
+# Tests that embed a generated ROM header must rebuild when it changes.
+$(TEST_OBJS): $(wildcard ../tests/roms/generated/*.h)
+
 .PHONY: test
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
