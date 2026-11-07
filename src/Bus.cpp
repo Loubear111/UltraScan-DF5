@@ -1,5 +1,8 @@
 #include "Bus.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -8,8 +11,12 @@ Bus::Bus(uint32_t ramBytes)
 {
 	cpu.ConnectBus(this);
 
-	// Zero-filled RAM of the requested size.
+	// RAM is mirrored by masking, so its size must be a power of two.
+	assert(ramBytes != 0 && (ramBytes & (ramBytes - 1)) == 0);
+
+	// Zero-filled RAM of the requested size and the internal SRAM.
 	ram.assign(ramBytes, 0);
+	sram.assign(SRAM_SIZE, 0);
 }
 
 Bus::~Bus()
@@ -31,9 +38,13 @@ bool Bus::loadImage(const uint8_t* data, size_t size, uint32_t addr)
 
 	const uint64_t p = addr & PHYS_MASK;
 
-	if (p < ram.size() && size <= ram.size() - p)
+	if (p < RAM_LIMIT)
 	{
-		std::memcpy(&ram[(size_t)p], data, size);
+		// Mirrored RAM: the image must fit between the mirrored start and the end of RAM.
+		const uint64_t idx = p & (ram.size() - 1);
+		if (size > ram.size() - idx)
+			return false;
+		std::memcpy(&ram[(size_t)idx], data, size);
 		return true;
 	}
 
@@ -96,6 +107,103 @@ static void put32(uint8_t* b, uint32_t v, bool le)
 	}
 }
 
+// ---- Memory regions ------------------------------------------------------
+Bus::Region Bus::classify(uint32_t p) const
+{
+	if (p < RAM_LIMIT)                                  return Region::Ram;
+	if (p >= SRAM_PHYS && p < SRAM_PHYS + SRAM_SIZE)    return Region::Sram;
+	if (inRom(p))                                       return Region::Rom;
+	if (inPPU(p) || inIRQC(p) || inMiu(p) || inDummy(p)) return Region::Device;
+	return Region::None;
+}
+
+uint8_t Bus::memByte(Region r, uint32_t p) const
+{
+	switch (r)
+	{
+	case Region::Ram:  return ram[p & (ram.size() - 1)];
+	case Region::Sram: return sram[(p - SRAM_PHYS) & (SRAM_SIZE - 1)];
+	case Region::Rom:  return romByte(p);
+	default:           return 0;
+	}
+}
+
+void Bus::memStore(Region r, uint32_t p, uint8_t v)
+{
+	if (r == Region::Ram)       ram[p & (ram.size() - 1)] = v;
+	else if (r == Region::Sram) sram[(p - SRAM_PHYS) & (SRAM_SIZE - 1)] = v;
+	// ROM is read-only.
+}
+
+// Read `span` bytes (2 or 4) from a memory region in the current byte order.
+uint32_t Bus::memRead(Region r, uint32_t p, unsigned span) const
+{
+	uint8_t b[4] = { 0, 0, 0, 0 };
+	if (r == Region::Ram)
+	{
+		const size_t idx = p & (ram.size() - 1);
+		if (idx + span <= ram.size())
+			return span == 4 ? get32(&ram[idx], little) : get16(&ram[idx], little);
+	}
+	for (unsigned i = 0; i < span; ++i)
+		b[i] = memByte(r, p + i);
+	return span == 4 ? get32(b, little) : get16(b, little);
+}
+
+void Bus::memWrite(Region r, uint32_t p, uint32_t v, unsigned span)
+{
+	if (r == Region::Ram)
+	{
+		const size_t idx = p & (ram.size() - 1);
+		if (idx + span <= ram.size())
+		{
+			if (span == 4) put32(&ram[idx], v, little);
+			else           put16(&ram[idx], (uint16_t)v, little);
+			return;
+		}
+	}
+	uint8_t b[4];
+	if (span == 4) put32(b, v, little);
+	else           put16(b, (uint16_t)v, little);
+	for (unsigned i = 0; i < span; ++i)
+		memStore(r, p + i, b[i]);
+}
+
+// ---- Unmapped-access log -------------------------------------------------
+void Bus::logUnmapped(uint32_t p, bool write) const
+{
+	UnmappedCount& c = unmapped[p >> 12];
+	if (write) ++c.writes; else ++c.reads;
+}
+
+std::vector<Bus::UnmappedPage> Bus::topUnmappedPages(size_t n) const
+{
+	std::vector<UnmappedPage> v;
+	v.reserve(unmapped.size());
+	for (const auto& kv : unmapped)
+		v.push_back({ kv.first << 12, kv.second.reads, kv.second.writes });
+	std::sort(v.begin(), v.end(), [](const UnmappedPage& a, const UnmappedPage& b) {
+		const uint64_t ta = a.reads + a.writes, tb = b.reads + b.writes;
+		return ta != tb ? ta > tb : a.page < b.page;
+	});
+	if (v.size() > n)
+		v.resize(n);
+	return v;
+}
+
+std::string Bus::unmappedSummary(size_t n) const
+{
+	std::string out;
+	char line[96];
+	for (const UnmappedPage& u : topUnmappedPages(n))
+	{
+		std::snprintf(line, sizeof(line), "  0x%08X  reads %llu  writes %llu\n", u.page,
+		              (unsigned long long)u.reads, (unsigned long long)u.writes);
+		out += line;
+	}
+	return out;
+}
+
 // ---- MMIO word access (devices are word-granular) ------------------------
 uint32_t Bus::mmioRead32(uint32_t phys) const
 {
@@ -103,7 +211,9 @@ uint32_t Bus::mmioRead32(uint32_t phys) const
 		return ppu.read32(PPU::BASE + (phys - PPU_PHYS));
 	if (inIRQC(phys))
 		return irqc.read32(phys - IRQC_PHYS);
-	return 0;
+	if (phys == MIU_STATUS)
+		return 1;
+	return 0;   // the small dummy window reads 0
 }
 
 void Bus::mmioWrite32(uint32_t phys, uint32_t data)
@@ -113,7 +223,7 @@ void Bus::mmioWrite32(uint32_t phys, uint32_t data)
 	else if (inIRQC(phys))
 		irqc.write32(phys - IRQC_PHYS, data);
 	else
-		return;
+		return;   // MIU status and the dummy window ignore writes
 	updateIRQ();
 }
 
@@ -143,10 +253,10 @@ void Bus::updateIRQ()
 uint8_t Bus::read8(uint32_t addr) const
 {
 	uint32_t p = addr & PHYS_MASK;
-	if (inRam(p, 1))
-		return ram[p];
-	if (inRom(p))
-		return romByte(p);
+	Region r = classify(p);
+	if (r == Region::None) { logUnmapped(p, false); return 0; }
+	if (r != Region::Device)
+		return memByte(r, p);
 
 	uint32_t word  = mmioRead32(p & ~3u);
 	uint8_t  shift = little ? (uint8_t)(8u * (p & 3u)) : (uint8_t)(8u * (3u - (p & 3u)));
@@ -156,8 +266,9 @@ uint8_t Bus::read8(uint32_t addr) const
 void Bus::write8(uint32_t addr, uint8_t data)
 {
 	uint32_t p = addr & PHYS_MASK;
-	if (inRam(p, 1)) { ram[p] = data; return; }
-	if (inRom(p)) return;
+	Region r = classify(p);
+	if (r == Region::None) { logUnmapped(p, true); return; }
+	if (r != Region::Device) { memStore(r, p, data); return; }
 
 	mmioWriteLane(p, data, 0xFFu, little ? 8u * (p & 3u) : 8u * (3u - (p & 3u)));
 }
@@ -165,13 +276,10 @@ void Bus::write8(uint32_t addr, uint8_t data)
 uint16_t Bus::read16(uint32_t addr) const
 {
 	uint32_t p = addr & PHYS_MASK;
-	if (inRam(p, 2))
-		return get16(&ram[p], little);
-	if (inRom(p))
-	{
-		uint8_t b[2] = { romByte(p), romByte(p + 1) };
-		return get16(b, little);
-	}
+	Region r = classify(p);
+	if (r == Region::None) { logUnmapped(p, false); return 0; }
+	if (r != Region::Device)
+		return (uint16_t)memRead(r, p, 2);
 
 	uint32_t word  = mmioRead32(p & ~3u);
 	uint8_t  shift = little ? ((p & 2u) ? 16u : 0u) : ((p & 2u) ? 0u : 16u);
@@ -181,8 +289,9 @@ uint16_t Bus::read16(uint32_t addr) const
 void Bus::write16(uint32_t addr, uint16_t data)
 {
 	uint32_t p = addr & PHYS_MASK;
-	if (inRam(p, 2)) { put16(&ram[p], data, little); return; }
-	if (inRom(p)) return;
+	Region r = classify(p);
+	if (r == Region::None) { logUnmapped(p, true); return; }
+	if (r != Region::Device) { memWrite(r, p, data, 2); return; }
 
 	mmioWriteLane(p, data, 0xFFFFu, little ? ((p & 2u) ? 16u : 0u) : ((p & 2u) ? 0u : 16u));
 }
@@ -190,13 +299,10 @@ void Bus::write16(uint32_t addr, uint16_t data)
 uint32_t Bus::read32(uint32_t addr) const
 {
 	uint32_t p = addr & PHYS_MASK;
-	if (inRam(p, 4))
-		return get32(&ram[p], little);
-	if (inRom(p))
-	{
-		uint8_t b[4] = { romByte(p), romByte(p + 1), romByte(p + 2), romByte(p + 3) };
-		return get32(b, little);
-	}
+	Region r = classify(p);
+	if (r == Region::None) { logUnmapped(p, false); return 0; }
+	if (r != Region::Device)
+		return memRead(r, p, 4);
 
 	return mmioRead32(p);
 }
@@ -204,8 +310,9 @@ uint32_t Bus::read32(uint32_t addr) const
 void Bus::write32(uint32_t addr, uint32_t data)
 {
 	uint32_t p = addr & PHYS_MASK;
-	if (inRam(p, 4)) { put32(&ram[p], data, little); return; }
-	if (inRom(p)) return;
+	Region r = classify(p);
+	if (r == Region::None) { logUnmapped(p, true); return; }
+	if (r != Region::Device) { memWrite(r, p, data, 4); return; }
 
 	mmioWrite32(p, data);
 }

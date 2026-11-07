@@ -40,29 +40,33 @@ TEST(BusImage, DefaultRamSizeIsUnchanged)
     EXPECT_EQ(b.ram.size(), 256u * 1024u);
     b.write32(0x3FFFC, 0x11223344u);
     EXPECT_EQ(b.read32(0x3FFFC), 0x11223344u);
-    b.write32(0x40000, 0x55667788u);                 // one past the end: dropped
-    EXPECT_EQ(b.read32(0x40000), 0u);
+    b.write32(0x40000, 0x55667788u);                 // one past the end: mirrors to address 0
+    EXPECT_EQ(b.read32(0x40000), 0x55667788u);
+    EXPECT_EQ(b.read32(0), 0x55667788u);
 }
 
-TEST(BusImage, ConfigurableRamRoundTripAndBounds)
+TEST(BusImage, ConfigurableRamRoundTripAndMirror)
 {
     Bus b(1024u * 1024u);
     b.write32(0xFFFFC, 0xDEADBEEFu);
     EXPECT_EQ(b.read32(0xFFFFC), 0xDEADBEEFu);
 
-    b.write32(0x100000, 0x12345678u);                // just above RAM: dropped
-    b.write8(0x100000, 0x99);
-    EXPECT_EQ(b.read32(0x100000), 0u);
-    EXPECT_EQ(b.read8(0x100000), 0u);
+    b.write32(0x100000, 0x12345678u);                // just above RAM: mirrors to 0
+    EXPECT_EQ(b.read32(0), 0x12345678u);
+    b.write8(0x100001, 0x99);
+    EXPECT_EQ(b.read8(1), 0x99u);
     EXPECT_EQ(b.read32(0xFFFFC), 0xDEADBEEFu);       // neighbour untouched
 }
 
-TEST(BusImage, AccessStraddlingRamEndIsDropped)
+TEST(BusImage, AccessStraddlingRamEndWrapsToTheStart)
 {
     Bus b(1024u);
-    b.write32(1022, 0xAABBCCDDu);                    // needs bytes 1022..1025
-    EXPECT_EQ(b.read8(1022), 0u);
-    EXPECT_EQ(b.read8(1023), 0u);
+    b.write32(1022, 0xAABBCCDDu);                    // bytes 1022, 1023, then 0, 1
+    EXPECT_EQ(b.read8(1022), 0xAAu);
+    EXPECT_EQ(b.read8(1023), 0xBBu);
+    EXPECT_EQ(b.read8(0), 0xCCu);
+    EXPECT_EQ(b.read8(1), 0xDDu);
+    EXPECT_EQ(b.read32(1022), 0xAABBCCDDu);
 }
 
 // ---- loadImage -----------------------------------------------------------
@@ -98,7 +102,7 @@ TEST(BusImage, LoadImageOutsideAnyRegionFails)
 {
     Bus b;
     const uint8_t data[] = { 1, 2, 3, 4 };
-    EXPECT_FALSE(b.loadImage(data, sizeof(data), 0x10000000u));
+    EXPECT_FALSE(b.loadImage(data, sizeof(data), 0x0C000000u));
     EXPECT_FALSE(b.loadImage(nullptr, 4, 0));
     EXPECT_TRUE(b.loadImage(data, 0, 0));            // empty image is a no-op
 }
@@ -108,21 +112,21 @@ TEST(BusImage, RomWindowIsReadableAtBothAliasesAndReadOnly)
 {
     Bus b;
     const uint8_t data[] = { 0xAA, 0xBB, 0xCC, 0xDD };
-    ASSERT_TRUE(b.loadImage(data, sizeof(data), 0x1F000000u));
+    ASSERT_TRUE(b.loadImage(data, sizeof(data), 0x10000000u));
 
-    EXPECT_EQ(b.read8(0x1F000000u), 0xAAu);
-    EXPECT_EQ(b.read8(0xBF000003u), 0xDDu);
-    EXPECT_EQ(b.read32(0x1F000000u), 0xAABBCCDDu);   // big-endian default
-    EXPECT_EQ(b.read32(0xBF000000u), 0xAABBCCDDu);
-    EXPECT_EQ(b.read16(0x1F000002u), 0xCCDDu);
+    EXPECT_EQ(b.read8(0x10000000u), 0xAAu);
+    EXPECT_EQ(b.read8(0xB0000003u), 0xDDu);
+    EXPECT_EQ(b.read32(0x10000000u), 0xAABBCCDDu);   // big-endian default
+    EXPECT_EQ(b.read32(0xB0000000u), 0xAABBCCDDu);
+    EXPECT_EQ(b.read16(0x10000002u), 0xCCDDu);
 
-    b.write32(0x1F000000u, 0x01020304u);             // ignored
-    b.write8(0xBF000001u, 0x55);
-    b.write16(0x1F000002u, 0x6666);
-    EXPECT_EQ(b.read32(0x1F000000u), 0xAABBCCDDu);
+    b.write32(0x10000000u, 0x01020304u);             // ignored
+    b.write8(0xB0000001u, 0x55);
+    b.write16(0x10000002u, 0x6666);
+    EXPECT_EQ(b.read32(0x10000000u), 0xAABBCCDDu);
 
-    EXPECT_EQ(b.read32(0x1F000004u), 0u);            // beyond the image
-    EXPECT_EQ(b.read32(0x1FFFFFFCu), 0u);            // end of the window
+    EXPECT_EQ(b.read32(0x10000004u), 0u);            // beyond the image
+    EXPECT_EQ(b.read32(0x10FFFFFCu), 0u);            // end of the window
 }
 
 TEST(BusImage, RomWindowLittleEndianAndPartialRead)
@@ -130,19 +134,19 @@ TEST(BusImage, RomWindowLittleEndianAndPartialRead)
     Bus b;
     b.setLittleEndian(true);
     const uint8_t data[] = { 0x01, 0x02, 0x03 };     // only 3 bytes loaded
-    ASSERT_TRUE(b.loadImage(data, sizeof(data), 0x1F000000u));
-    EXPECT_EQ(b.read32(0x1F000000u), 0x00030201u);   // 4th byte reads as 0
-    EXPECT_EQ(b.read16(0x1F000000u), 0x0201u);
+    ASSERT_TRUE(b.loadImage(data, sizeof(data), 0x10000000u));
+    EXPECT_EQ(b.read32(0x10000000u), 0x00030201u);   // 4th byte reads as 0
+    EXPECT_EQ(b.read16(0x10000000u), 0x0201u);
 }
 
 TEST(BusImage, RomImageMayStartInsideTheWindowAndMustFit)
 {
     Bus b;
     const uint8_t data[] = { 9, 8, 7, 6 };
-    ASSERT_TRUE(b.loadImage(data, sizeof(data), 0x1F000010u));
-    EXPECT_EQ(b.read8(0x1F000010u), 9u);
-    EXPECT_EQ(b.read8(0x1F000000u), 0u);
-    EXPECT_FALSE(b.loadImage(data, sizeof(data), 0x1FFFFFFEu));  // crosses the end
+    ASSERT_TRUE(b.loadImage(data, sizeof(data), 0x10000010u));
+    EXPECT_EQ(b.read8(0x10000010u), 9u);
+    EXPECT_EQ(b.read8(0x10000000u), 0u);
+    EXPECT_FALSE(b.loadImage(data, sizeof(data), 0x10FFFFFEu));  // crosses the end
 }
 
 // ---- Endianness ----------------------------------------------------------

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -14,13 +15,30 @@ public:
 	// Default RAM size: the original 64K-word (256 KiB) window.
 	static constexpr uint32_t DEFAULT_RAM_SIZE = 256u * 1024u;
 
-	// Read-only ROM window (physical 0x1F00_0000, alias 0xBF00_0000) meant for a
-	// future BIOS image. Reads beyond the loaded image return 0; writes are ignored.
-	static constexpr uint32_t ROM_PHYS   = 0x1F000000u;
+	// Size of the real machine's RAM (System uses this).
+	static constexpr uint32_t SYSTEM_RAM_SIZE = 16u * 1024u * 1024u;
+
+	// RAM answers every physical address below this limit, mirrored every
+	// ram.size() bytes (MAME: 16 MiB mirrored through 0x0800_0000).
+	static constexpr uint32_t RAM_LIMIT = 0x08000000u;
+
+	// Internal SRAM, 16 KiB at physical 0x0A00_0000 [MAME].
+	static constexpr uint32_t SRAM_PHYS = 0x0A000000u;
+	static constexpr uint32_t SRAM_SIZE = 16u * 1024u;
+
+	// Small fixed devices [MAME]: the MIU status register reads 1; a 16-byte
+	// window at 0x0824_0000 reads 0 and ignores writes.
+	static constexpr uint32_t MIU_STATUS  = 0x0807006Cu;
+	static constexpr uint32_t DUMMY_PHYS  = 0x08240000u;
+	static constexpr uint32_t DUMMY_SIZE  = 0x10u;
+
+	// Read-only ROM window (physical 0x1000_0000, alias 0x9000_0000/0xB000_0000)
+	// meant for a future BIOS image (MAME places the BIOS here). Reads beyond
+	// the loaded image return 0; writes are ignored.
+	static constexpr uint32_t ROM_PHYS   = 0x10000000u;
 	static constexpr uint32_t ROM_WINDOW = 0x01000000u;   // 16 MiB
 
-	// `ramBytes` must stay below the PPU window (0x0801_0000 physical) or it
-	// would shadow the PPU registers.
+	// `ramBytes` must be a power of two (RAM is mirrored by masking).
 	explicit Bus(uint32_t ramBytes = DEFAULT_RAM_SIZE);
 	~Bus();
 
@@ -33,13 +51,15 @@ public: // Devices on bus
 	// Peripheral interrupt controller (IRQController::BASE = 0x880A_0000).
 	IRQController irqc;
 
-	// RAM region, byte-addressed starting at address 0.
-	// NOTE: real hardware resets at PC=0xFF00_0000 with the PPU/ROM mapped
-	// far above this RAM window; loading real cartridge images at their
-	// real addresses is done with loadImage()/loadFile(). loadROM() still
-	// places code at address 0 to match the existing CPU/ROM test-harness
-	// convention.
+	// RAM region, byte-addressed starting at address 0 and mirrored through
+	// the whole physical range below RAM_LIMIT (index = addr & (size - 1)).
+	// Loading real images at their real addresses is done with
+	// loadImage()/loadFile(). loadROM() still places code at address 0 to
+	// match the existing CPU/ROM test-harness convention.
 	std::vector<uint8_t> ram;
+
+	// Internal SRAM (SRAM_PHYS, SRAM_SIZE bytes).
+	std::vector<uint8_t> sram;
 
 	// Read-only ROM window contents (grown on demand by loadImage()).
 	std::vector<uint8_t> rom;
@@ -71,8 +91,9 @@ public: // Bus read/write, byte-addressed across the full 32-bit space.
 	// Addresses are reduced to a 29-bit physical address (addr & 0x1FFFFFFF),
 	// so aliases such as 0xA000_0000 -> 0x0 and 0x8801_0000 -> 0x0801_0000
 	// reach the same device. Every access is routed by physical range to the
-	// device that owns it (RAM, ROM window, PPU, IRQ controller); reads outside
-	// any mapped region return 0 and writes are ignored.
+	// device that owns it (RAM, SRAM, ROM window, PPU, IRQ controller, MIU
+	// status); reads outside any mapped region return 0, writes are ignored,
+	// and both are counted in the unmapped-access log.
 	uint8_t  read8(uint32_t addr) const;
 	void     write8(uint32_t addr, uint8_t data);
 	uint16_t read16(uint32_t addr) const;
@@ -84,6 +105,20 @@ public: // Bus read/write, byte-addressed across the full 32-bit space.
 	// automatically after MMIO writes; call it after raising a PPU event hook.
 	void updateIRQ();
 
+	// Unmapped-access log: reads and writes per 4 KiB physical page that no
+	// region owns. Shows which I/O a program touches that is not modelled yet.
+	struct UnmappedPage
+	{
+		uint32_t page;      // physical address of the page start
+		uint64_t reads;
+		uint64_t writes;
+	};
+	// The n busiest pages, most accesses first (ties by address).
+	std::vector<UnmappedPage> topUnmappedPages(size_t n = 10) const;
+	// One line per page from topUnmappedPages(), for the end-of-run report.
+	std::string unmappedSummary(size_t n = 10) const;
+	void clearUnmappedLog() { unmapped.clear(); }
+
 private:
 	static constexpr uint32_t PHYS_MASK = 0x1FFFFFFFu;
 	static constexpr uint32_t PPU_PHYS  = PPU::BASE & PHYS_MASK;
@@ -94,7 +129,19 @@ private:
 	static bool inPPU(uint32_t p)  { return p >= PPU_PHYS  && p < PPU_PHYS  + 0x10000u; }
 	static bool inIRQC(uint32_t p) { return p >= IRQC_PHYS && p < IRQC_PHYS + IRQController::WINDOW; }
 	static bool inRom(uint32_t p)  { return p >= ROM_PHYS  && p < ROM_PHYS  + ROM_WINDOW; }
-	bool inRam(uint32_t p, uint32_t span) const { return p < ram.size() && span <= ram.size() - p; }
+	static bool inMiu(uint32_t p)   { return p >= (MIU_STATUS & ~3u) && p < (MIU_STATUS & ~3u) + 4u; }
+	static bool inDummy(uint32_t p) { return p >= DUMMY_PHYS && p < DUMMY_PHYS + DUMMY_SIZE; }
+
+	enum class Region { Ram, Sram, Rom, Device, None };
+	Region   classify(uint32_t p) const;
+	uint8_t  memByte(Region r, uint32_t p) const;
+	void     memStore(Region r, uint32_t p, uint8_t v);
+	uint32_t memRead(Region r, uint32_t p, unsigned span) const;
+	void     memWrite(Region r, uint32_t p, uint32_t v, unsigned span);
+
+	struct UnmappedCount { uint64_t reads = 0; uint64_t writes = 0; };
+	mutable std::map<uint32_t, UnmappedCount> unmapped;   // key = physical page number
+	void logUnmapped(uint32_t p, bool write) const;
 
 	// Byte of the ROM window; 0 beyond the loaded image.
 	uint8_t romByte(uint32_t p) const { uint32_t o = p - ROM_PHYS; return o < rom.size() ? rom[o] : 0; }
