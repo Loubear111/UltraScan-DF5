@@ -46,6 +46,8 @@ void usage(const char* argv0)
 		"  --stop-on-call      stop at the first such call (implies --log-calls)\n"
 		"  --stub-calls        answer such calls with r4 = 0 and carry on (implies --log-calls)\n"
 		"  --stub-ramp N       with --stub-calls: answer the k-th call to a target with k*N (default 0)\n"
+		"  --press NAME[:PORT]@FRAME[+COUNT]  hold a controller button from FRAME for COUNT frames (default 6); repeatable.\n"
+		"                      names: blue start select lshoulder rshoulder ltrigger rtrigger yellow red green up down left right\n"
 		"ADDR/VALUE accept 0x hex or decimal.\n",
 		argv0, argv0);
 }
@@ -69,6 +71,7 @@ struct Options
 	bool stopOnCall = false;
 	bool stubCalls = false;
 	uint32_t stubRamp = 0;
+	std::vector<std::string> presses;
 	size_t logIo = 0;
 	uint32_t cyclesPerInstr = System::CYCLES_PER_INSTRUCTION;
 	std::string bios;
@@ -132,6 +135,7 @@ bool parseArgs(int argc, char** argv, Options& o)
 		else if (a == "--log-calls")      o.logCalls = true;
 		else if (a == "--stop-on-call")   o.stopOnCall = true;
 		else if (a == "--stub-calls")     o.stubCalls = true;
+		else if (a == "--press")          { if (i + 1 >= argc) { std::fprintf(stderr, "--press needs NAME@FRAME[+COUNT]\n"); return false; } o.presses.push_back(argv[++i]); }
 		else if (a == "--stub-ramp")      { if (!value(v)) return false; o.stubRamp = (uint32_t)v; o.stubCalls = true; }
 		else if (a == "--load")           { if (!value(v)) return false; o.boot.loadAddr = (uint32_t)v; }
 		else if (a == "--entry")          { if (!value(v)) return false; o.boot.entryPc = (uint32_t)v; o.entryGiven = true; }
@@ -172,6 +176,20 @@ bool readWholeFile(const std::string& path, std::vector<uint8_t>& out)
 		return false;
 	out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 	return !out.empty();
+}
+
+bool addPresses(System& sys, const Options& o)
+{
+	for (const std::string& spec : o.presses)
+	{
+		std::string err;
+		if (!sys.addPress(spec, &err))
+		{
+			std::fprintf(stderr, "--press: %s\n", err.c_str());
+			return false;
+		}
+	}
+	return true;
 }
 
 int runAndReport(System& sys, const Options& o)
@@ -272,6 +290,7 @@ int main(int argc, char** argv)
 		sys.stopOnCall = o.stopOnCall;
 		sys.stubCalls  = o.stubCalls;
 		sys.stubRamp   = o.stubRamp;
+		if (!addPresses(sys, o)) return 2;
 		DiscImage disc;
 		if (!o.input.empty())
 		{
@@ -325,6 +344,7 @@ int main(int argc, char** argv)
 	sys.stopOnCall = o.stopOnCall;
 	sys.stubCalls  = o.stubCalls;
 	sys.stubRamp   = o.stubRamp;
+	if (!addPresses(sys, o)) return 2;
 
 	if (!sys.boot(exe.data(), exe.size(), o.boot))
 	{

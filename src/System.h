@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "Boot.h"
@@ -117,7 +118,25 @@ public:
 
 	static const char* stopReasonName(StopReason r);
 
+	// ---- Scripted controller input (Phase 5, story 30) ------------------------------
+	// Spec "NAME[:PORT]@FRAME[+COUNT]": hold NAME on controller PORT (0 or 1, default 0)
+	// from frame FRAME (counted from reset, across run() calls) for COUNT frames
+	// (default 6). Buttons follow MAME's hyperscan_ctrl: byte 0 = blue 01, start 02,
+	// select 04, lshoulder 08, rshoulder 10, ltrigger 20, rtrigger 40; byte 1 = yellow 20,
+	// red 40, green 80. up/down/left/right drive the analog bytes 2 (Y) and 3 (X) to
+	// 0x00 / 0xFF (centre 0x7F); which end is "up" is a guess. Returns false and sets
+	// `error` for an unknown name or a malformed spec.
+	bool addPress(const std::string& spec, std::string* error = nullptr);
+	size_t pressCount() const { return m_presses.size(); }
+	// Recompute the controller bytes for the given frame (done by run() itself).
+	void applyInput(uint64_t frame);
+	uint64_t totalFrames() const { return m_totalFrames; }
+
 private:
+	struct Press { unsigned port; unsigned index; uint8_t mask; bool analog; uint8_t value; uint64_t from, to; };
+	std::vector<Press> m_presses;
+	uint64_t m_totalFrames = 0;
+
 	std::vector<CallStat>  m_callStats;
 	std::vector<CallEvent> m_callSequence;
 	uint64_t               m_totalCalls = 0;

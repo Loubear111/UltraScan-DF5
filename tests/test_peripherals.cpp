@@ -11,6 +11,7 @@
 #include "DiscImage.h"
 #include "I2C.h"
 #include "IRQController.h"
+#include "System.h"
 #include "Timer.h"
 
 // ---- Timer ---------------------------------------------------------------
@@ -466,4 +467,60 @@ TEST(CdServo, TheBusDeliversSectorsIntoRamAndRaisesInterruptSource3)
 	EXPECT_EQ(b.irqc.activeVector(), 60);                  // MAME: CD servo on line 60
 	b.cpu.onIrqTaken(60);
 	EXPECT_FALSE(b.irqc.irqActive());
+}
+
+// ---- Scripted controller input (story 30) -----------------------------------
+TEST(ScriptedInput, ButtonHeldForTheRequestedFrames)
+{
+	System sys(1u << 20);
+	std::string err;
+	ASSERT_TRUE(sys.addPress("start@3+2", &err)) << err;
+	ASSERT_TRUE(sys.addPress("red:1@4", &err)) << err;
+	sys.applyInput(2);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x00);
+	sys.applyInput(3);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x02);   // start
+	sys.applyInput(4);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x02);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(1, 1), 0x40);   // red on port 1 only
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 1), 0x00);
+	sys.applyInput(5);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x00);   // start released after 2 frames
+	EXPECT_EQ(sys.bus.i2c.controllerByte(1, 1), 0x40);
+	sys.applyInput(10);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(1, 1), 0x00);   // default 6 frames: 4..9
+}
+
+TEST(ScriptedInput, AxesMoveAndRecentre)
+{
+	System sys(1u << 20);
+	ASSERT_TRUE(sys.addPress("up@1+1"));
+	ASSERT_TRUE(sys.addPress("right@1+1"));
+	sys.applyInput(1);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 2), 0x00);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 3), 0xFF);
+	sys.applyInput(2);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 2), 0x7F);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 3), 0x7F);
+}
+
+TEST(ScriptedInput, BadSpecsAreRejected)
+{
+	System sys(1u << 20);
+	std::string err;
+	EXPECT_FALSE(sys.addPress("start", &err));
+	EXPECT_FALSE(sys.addPress("bogus@10", &err));
+	EXPECT_FALSE(sys.addPress("start:2@10", &err));
+	EXPECT_FALSE(sys.addPress("start@x", &err));
+	EXPECT_FALSE(sys.addPress("start@10+0", &err));
+	EXPECT_FALSE(sys.addPress("start@10+3z", &err));
+	EXPECT_EQ(sys.pressCount(), 0u);
+}
+
+TEST(ScriptedInput, NoPressesLeavesManualBytesAlone)
+{
+	System sys(1u << 20);
+	sys.bus.i2c.setControllerByte(0, 0, 0x55);
+	sys.applyInput(7);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x55);
 }
