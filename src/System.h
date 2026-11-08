@@ -35,7 +35,7 @@ public:
 	// Applied when a run is asked for no limit at all.
 	static constexpr uint64_t DEFAULT_INSTRUCTION_CAP = 100000000ull;
 
-	enum class StopReason { FrameLimit, InstructionLimit, CpuFault, Hang, BiosCall, BadCallReturn };
+	enum class StopReason { FrameLimit, InstructionLimit, CpuFault, Hang, BiosCall, BadCallReturn, UserStop };
 
 	// ---- BIOS-call tracking (Phase 5, stories 19 and 20) ---------------------------
 	// A program that was loaded as a bare executable calls into the BIOS through
@@ -132,10 +132,25 @@ public:
 	void applyInput(uint64_t frame);
 	uint64_t totalFrames() const { return m_totalFrames; }
 
+	// ---- Live input (the viewer): hold or release a button now, on top of any scripted
+	// presses. Same names as addPress; returns false for an unknown name or port.
+	bool setLiveButton(unsigned port, const std::string& name, bool down);
+
+	// The output frame as the current PPU, TVE and memory state would show it (what run()
+	// hands to the frame callback).
+	std::vector<PPU::Color> composeFrame(int& w, int& h) const;
+
+	// Ask run() to return after the current frame (StopReason::UserStop); the viewer's
+	// callback uses it when the window is closed.
+	void requestStop() { m_stopRequested = true; }
+
 private:
 	struct Press { unsigned port; unsigned index; uint8_t mask; bool analog; uint8_t value; uint64_t from, to; };
 	std::vector<Press> m_presses;
 	uint64_t m_totalFrames = 0;
+	bool m_liveActive = false;
+	uint8_t m_live[I2CMaster::PORTS][4] = { { 0, 0, 0x7F, 0x7F }, { 0, 0, 0x7F, 0x7F } };
+	bool m_stopRequested = false;
 
 	std::vector<CallStat>  m_callStats;
 	std::vector<CallEvent> m_callSequence;

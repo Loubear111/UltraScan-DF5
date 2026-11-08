@@ -30,12 +30,22 @@ SDIS_LIB_OBJS  = $(SDIS_DIR)/scoredsm.o $(SDIS_DIR)/score_disasm.o
 #all objects 
 OBJS = main.o Bus.o spg290.o ppu.o IRQController.o DiscImage.o FaultReport.o TVE.o Timer.o I2C.o CdServo.o Boot.o System.o
 
+# Optional live window (story 39): make VIEWER=1. Needs raylib; point RAYLIB_DIR at its src
+# folder (header and libraylib.a). Delete the .o files when switching, as the Makefile does
+# not track the flag.
+ifeq ($(VIEWER),1)
+RAYLIB_DIR ?= C:/raylib/raylib/src
+CXXFLAGS += -DHAVE_VIEWER "-I$(RAYLIB_DIR)"
+OBJS += Viewer.o
+VIEWER_LIBS = "-L$(RAYLIB_DIR)" -lraylib -lopengl32 -lgdi32 -lwinmm
+endif
+
 # Default target
 all: $(TARGET)
 
 # Link the files
 $(TARGET): $(OBJS) $(SDIS_LIB_OBJS)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(VIEWER_LIBS)
 
 # compile main
 main.o: main.cpp System.o

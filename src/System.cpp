@@ -66,13 +66,49 @@ bool System::addPress(const std::string& spec, std::string* error)
 	return fail("unknown button");
 }
 
+std::vector<PPU::Color> System::composeFrame(int& w, int& h) const
+{
+	std::vector<PPU::Color> ppuFrame;
+	const std::vector<PPU::Color>* pf = nullptr;
+	if (bus.ppu.ppuEnabled())
+	{
+		ppuFrame = bus.ppu.renderFrame(BusMemory(bus));
+		pf = &ppuFrame;
+	}
+	return bus.tve.compose(bus, pf, w, h);
+}
+
+bool System::setLiveButton(unsigned port, const std::string& name, bool down)
+{
+	if (port >= I2CMaster::PORTS)
+		return false;
+	for (const ButtonDef& b : BUTTONS)
+		if (name == b.name)
+		{
+			if (down) m_live[port][b.index] |= b.mask;
+			else      m_live[port][b.index] &= (uint8_t)~b.mask;
+			m_liveActive = true;
+			applyInput(m_totalFrames);
+			return true;
+		}
+	for (const AxisDef& a : AXES)
+		if (name == a.name)
+		{
+			m_live[port][a.index] = down ? a.value : 0x7F;
+			m_liveActive = true;
+			applyInput(m_totalFrames);
+			return true;
+		}
+	return false;
+}
+
 void System::applyInput(uint64_t frame)
 {
-	if (m_presses.empty())
+	if (m_presses.empty() && !m_liveActive)
 		return;
 	for (unsigned port = 0; port < I2CMaster::PORTS; ++port)
 	{
-		uint8_t bytes[4] = { 0, 0, 0x7F, 0x7F };
+		uint8_t bytes[4] = { m_live[port][0], m_live[port][1], m_live[port][2], m_live[port][3] };
 		for (const Press& p : m_presses)
 		{
 			if (p.port != port || frame < p.from || frame >= p.to)
@@ -194,20 +230,19 @@ System::RunStats System::run(uint64_t maxFrames, uint64_t maxInstructions, const
 
 		if (bus.takeFrameReady())
 		{
-			std::vector<PPU::Color> ppuFrame;
-			const std::vector<PPU::Color>* pf = nullptr;
-			if (bus.ppu.ppuEnabled())
-			{
-				ppuFrame = bus.ppu.renderFrame(BusMemory(bus));
-				pf = &ppuFrame;
-			}
 			int w = 0, h = 0;
-			const std::vector<PPU::Color> fb = bus.tve.compose(bus, pf, w, h);
+			const std::vector<PPU::Color> fb = composeFrame(w, h);
 			if (onFrame)
 				onFrame(fb, w, h, s.frames);
 			++s.frames;
 			++m_totalFrames;
 			applyInput(m_totalFrames);
+			if (m_stopRequested)
+			{
+				m_stopRequested = false;
+				s.reason = StopReason::UserStop;
+				break;
+			}
 			if (maxFrames && s.frames >= maxFrames)
 			{
 				s.reason = StopReason::FrameLimit;
@@ -234,6 +269,7 @@ const char* System::stopReasonName(StopReason r)
 	case StopReason::Hang:             return "hang";
 	case StopReason::BiosCall:         return "BIOS call";
 	case StopReason::BadCallReturn:    return "BIOS call with no usable return address";
+	case StopReason::UserStop:         return "stopped by the user";
 	}
 	return "unknown";
 }

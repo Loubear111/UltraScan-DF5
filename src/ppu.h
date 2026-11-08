@@ -282,6 +282,11 @@ public:
 	bool       transRGBEnabled() const { return (m_ctrl[P_Trans_RGB / 4] & TRANS_RGB_EN_BIT) != 0; }
 	uint16_t   transRGB()    const { return (uint16_t)(m_ctrl[P_Trans_RGB / 4] & TRANS_RGB_MASK); }
 
+	// Debug aid for the viewer: hide layers while rendering. Bits 0-2 hide text layers 0-2,
+	// bit 3 hides all sprites. Not a hardware register and not reset by reset().
+	static constexpr uint32_t HIDE_SPRITES = 1u << 3;
+	uint32_t debugHide = 0;
+
 	static void resolutionSize(Resolution r, int &w, int &h);
 	void screenSize(int &w, int &h) const { resolutionSize(resolution(), w, h); }
 

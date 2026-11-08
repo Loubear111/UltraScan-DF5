@@ -14,6 +14,10 @@
 #include "DiscImage.h"
 #include "FaultReport.h"
 #include "FrameWriter.h"
+#ifdef HAVE_VIEWER
+#include <memory>
+#include "Viewer.h"
+#endif
 #include "System.h"
 
 namespace {
@@ -36,6 +40,9 @@ void usage(const char* argv0)
 		"  --max-instr N       stop after N instructions (default: no limit beyond --frames)\n"
 		"  --out DIR           folder for frame_NNNNNN.bmp (default frames)\n"
 		"  --every K           write every Kth frame (default 1)\n"
+		"  --png               write frames as PNG instead of BMP\n"
+		"  --window            show the run in a live window (needs a build with make VIEWER=1); keys: F6 in the window\n"
+		"  --speed 1|2|max     viewer speed (default 1; Tab changes it in the window)\n"
 		"  --little-endian | --big-endian   byte order of the image (default little-endian)\n"
 		"  --trace N           print the last N executed instructions at the end\n"
 		"  --stop-on-unimpl    stop at the first undefined/unimplemented instruction\n"
@@ -64,6 +71,10 @@ struct Options
 	uint64_t maxInstr = 0;
 	std::string outDir = "frames";
 	uint64_t every = 1;
+	bool framesGiven = false;
+	bool png = false;
+	bool window = false;
+	int speed = 0;          // viewer: 0 = 1x, 1 = 2x, 2 = max
 	size_t trace = 0;
 	bool stopOnUnimpl = false;
 	bool stopOnHang = false;
@@ -142,8 +153,17 @@ bool parseArgs(int argc, char** argv, Options& o)
 		else if (a == "--cr3")            { if (!value(v)) return false; o.boot.cr3 = (uint32_t)v; }
 		else if (a == "--sp")             { if (!value(v)) return false; o.boot.sp = (uint32_t)v; }
 		else if (a == "--ram-mib")        { if (!value(v)) return false; o.ramMiB = (uint32_t)v; }
-		else if (a == "--frames")         { if (!value(v)) return false; o.frames = v; }
+		else if (a == "--frames")         { if (!value(v)) return false; o.frames = v; o.framesGiven = true; }
 		else if (a == "--max-instr")      { if (!value(v)) return false; o.maxInstr = v; }
+		else if (a == "--png")            o.png = true;
+		else if (a == "--window")         o.window = true;
+		else if (a == "--speed")
+		{
+			if (i + 1 >= argc) { std::fprintf(stderr, "--speed needs 1, 2 or max\n"); return false; }
+			const std::string sp = argv[++i];
+			if (sp == "1") o.speed = 0; else if (sp == "2") o.speed = 1; else if (sp == "max") o.speed = 2;
+			else { std::fprintf(stderr, "--speed must be 1, 2 or max\n"); return false; }
+		}
 		else if (a == "--every")          { if (!value(v)) return false; o.every = v ? v : 1; }
 		else if (a == "--trace")          { if (!value(v)) return false; o.trace = (size_t)v; }
 		else if (!a.empty() && a[0] == '-')
@@ -197,13 +217,40 @@ int runAndReport(System& sys, const Options& o)
 	sys.bus.ioLogLimit = o.logIo;
 	sys.cyclesPerInstruction = o.cyclesPerInstr;
 	uint64_t written = 0;
+#ifdef HAVE_VIEWER
+	std::unique_ptr<Viewer> viewer;
+	if (o.window)
+	{
+		viewer.reset(new Viewer(sys, o.outDir, o.speed));
+		if (!viewer->ok())
+		{
+			std::fprintf(stderr, "could not open the window\n");
+			return 2;
+		}
+	}
+#else
+	if (o.window)
+	{
+		std::fprintf(stderr, "--window needs a build with the viewer: make VIEWER=1\n");
+		return 2;
+	}
+#endif
+	const bool live = o.window;
 	auto onFrame = [&](const std::vector<PPU::Color>& fb, int w, int h, uint64_t n) {
+#ifdef HAVE_VIEWER
+		if (viewer)
+		{
+			viewer->onFrame(fb, w, h, n);
+			return;
+		}
+#endif
 		if (n % o.every != 0)
 			return;
 		char name[64];
-		std::snprintf(name, sizeof(name), "frame_%06llu.bmp", (unsigned long long)n);
+		std::snprintf(name, sizeof(name), o.png ? "frame_%06llu.png" : "frame_%06llu.bmp", (unsigned long long)n);
 		const std::string path = o.outDir + "/" + name;
-		if (frame_io::writeBMP(path, fb, w, h))
+		const bool okWrite = o.png ? frame_io::writePNG(path, fb, w, h) : frame_io::writeBMP(path, fb, w, h);
+		if (okWrite)
 		{
 			std::printf("wrote %s (%dx%d)\n", path.c_str(), w, h);
 			++written;
@@ -212,7 +259,10 @@ int runAndReport(System& sys, const Options& o)
 			std::fprintf(stderr, "could not write %s\n", path.c_str());
 	};
 
-	const System::RunStats s = sys.run(o.frames, o.maxInstr, onFrame);
+	// A live window runs until it is closed unless a frame or instruction limit was given.
+	const uint64_t maxFrames = (live && !o.framesGiven) ? 0 : o.frames;
+	const uint64_t maxInstr = (live && o.maxInstr == 0) ? ~0ull : o.maxInstr;
+	const System::RunStats s = sys.run(maxFrames, maxInstr, onFrame);
 
 	std::printf("frames %llu, instructions %llu, CPU cycles %llu, stopped by %s, final pc 0x%08X\n",
 	            (unsigned long long)s.frames, (unsigned long long)s.instructions,
@@ -256,7 +306,8 @@ int runAndReport(System& sys, const Options& o)
 	}
 
 	return (s.reason == System::StopReason::FrameLimit || s.reason == System::StopReason::InstructionLimit ||
-	        s.reason == System::StopReason::BiosCall) ? 0 : 3;
+	        s.reason == System::StopReason::BiosCall ||
+	        s.reason == System::StopReason::UserStop) ? 0 : 3;
 }
 
 } // namespace

@@ -50,3 +50,9 @@ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVI
 DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
 IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
 OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+## raylib (optional live viewer)
+
+The optional live viewer (`src/Viewer.cpp`, built only with `make VIEWER=1`) links against
+raylib, Copyright (c) 2013-2026 Ramon Santamaria, under the zlib licence. raylib is not
+included in this repository and is not needed for the default build or the tests.

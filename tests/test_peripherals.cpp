@@ -524,3 +524,148 @@ TEST(ScriptedInput, NoPressesLeavesManualBytesAlone)
 	sys.applyInput(7);
 	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x55);
 }
+
+// ---- Live display support (story 39), headless parts ---------------------------
+#include "FrameWriter.h"
+
+namespace {
+// Reassemble the pixel data of a PNG made of stored deflate blocks, checking every CRC.
+bool decodeStoredPng(const std::vector<uint8_t>& png, int& w, int& h, std::vector<uint8_t>& scan)
+{
+	if (png.size() < 8 || png[1] != 'P' || png[2] != 'N' || png[3] != 'G') return false;
+	size_t pos = 8;
+	std::vector<uint8_t> z;
+	bool sawEnd = false;
+	while (pos + 12 <= png.size())
+	{
+		const uint32_t len = (uint32_t)png[pos] << 24 | (uint32_t)png[pos + 1] << 16 | (uint32_t)png[pos + 2] << 8 | png[pos + 3];
+		const std::string type(png.begin() + (std::ptrdiff_t)pos + 4, png.begin() + (std::ptrdiff_t)pos + 8);
+		if (pos + 12 + len > png.size()) return false;
+		const uint32_t crc = frame_io::detail::crc32(&png[pos + 4], 4 + len);
+		const size_t cp = pos + 8 + len;
+		const uint32_t want = (uint32_t)png[cp] << 24 | (uint32_t)png[cp + 1] << 16 | (uint32_t)png[cp + 2] << 8 | png[cp + 3];
+		if (crc != want) return false;
+		if (type == "IHDR")
+		{
+			w = (int)((uint32_t)png[pos + 8] << 24 | (uint32_t)png[pos + 9] << 16 | (uint32_t)png[pos + 10] << 8 | png[pos + 11]);
+			h = (int)((uint32_t)png[pos + 12] << 24 | (uint32_t)png[pos + 13] << 16 | (uint32_t)png[pos + 14] << 8 | png[pos + 15]);
+		}
+		else if (type == "IDAT")
+			z.insert(z.end(), png.begin() + (std::ptrdiff_t)pos + 8, png.begin() + (std::ptrdiff_t)cp);
+		else if (type == "IEND")
+			sawEnd = true;
+		pos = cp + 4;
+	}
+	if (!sawEnd || z.size() < 6) return false;
+	size_t i = 2;                                   // skip the zlib header
+	for (;;)
+	{
+		if (i + 5 > z.size()) return false;
+		const bool last = z[i] & 1;
+		const uint32_t n = z[i + 1] | (uint32_t)z[i + 2] << 8;
+		if ((uint16_t)(z[i + 3] | z[i + 4] << 8) != (uint16_t)~n) return false;
+		scan.insert(scan.end(), z.begin() + (std::ptrdiff_t)i + 5, z.begin() + (std::ptrdiff_t)(i + 5 + n));
+		i += 5 + n;
+		if (last) break;
+	}
+	return true;
+}
+} // namespace
+
+TEST(FramePng, RoundTripsPixelsAcrossStoredBlocks)
+{
+	const int w = 300, h = 120;                     // 108,120 raw bytes: needs two stored blocks
+	std::vector<PPU::Color> fb((size_t)w * h);
+	for (int y = 0; y < h; ++y)
+		for (int x = 0; x < w; ++x)
+			fb[(size_t)y * w + x] = PPU::Color{ (uint8_t)x, (uint8_t)y, (uint8_t)(x ^ y) };
+	const std::vector<uint8_t> png = frame_io::encodePNG(fb, w, h);
+	int rw = 0, rh = 0;
+	std::vector<uint8_t> scan;
+	ASSERT_TRUE(decodeStoredPng(png, rw, rh, scan));
+	EXPECT_EQ(rw, w);
+	EXPECT_EQ(rh, h);
+	ASSERT_EQ(scan.size(), (size_t)h * (w * 3 + 1));
+	for (int y = 0; y < h; ++y)
+	{
+		ASSERT_EQ(scan[(size_t)y * (w * 3 + 1)], 0);   // filter type 0
+		for (int x = 0; x < w; ++x)
+		{
+			const uint8_t* px = &scan[(size_t)y * (w * 3 + 1) + 1 + (size_t)x * 3];
+			ASSERT_EQ(px[0], fb[(size_t)y * w + x].r);
+			ASSERT_EQ(px[1], fb[(size_t)y * w + x].g);
+			ASSERT_EQ(px[2], fb[(size_t)y * w + x].b);
+		}
+	}
+}
+
+TEST(FramePng, KnownCrcAndBadSizes)
+{
+	const uint8_t s[] = { '1', '2', '3', '4', '5', '6', '7', '8', '9' };
+	EXPECT_EQ(frame_io::detail::crc32(s, sizeof(s)), 0xCBF43926u);   // the standard CRC-32 check value
+	EXPECT_TRUE(frame_io::encodePNG({}, 4, 4).empty());
+	EXPECT_TRUE(frame_io::encodePNG(std::vector<PPU::Color>(4), 0, 4).empty());
+}
+
+TEST(LiveInput, ButtonsAndAxesHoldUntilReleased)
+{
+	System sys(1u << 20);
+	EXPECT_TRUE(sys.setLiveButton(0, "start", true));
+	EXPECT_TRUE(sys.setLiveButton(0, "blue", true));
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x03);
+	EXPECT_TRUE(sys.setLiveButton(0, "start", false));
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x01);
+	EXPECT_TRUE(sys.setLiveButton(1, "green", true));
+	EXPECT_EQ(sys.bus.i2c.controllerByte(1, 1), 0x80);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 1), 0x00);
+	EXPECT_TRUE(sys.setLiveButton(0, "left", true));
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 3), 0x00);
+	EXPECT_TRUE(sys.setLiveButton(0, "left", false));
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 3), 0x7F);
+	EXPECT_FALSE(sys.setLiveButton(0, "bogus", true));
+	EXPECT_FALSE(sys.setLiveButton(2, "start", true));
+}
+
+TEST(LiveInput, CombinesWithScriptedPresses)
+{
+	System sys(1u << 20);
+	ASSERT_TRUE(sys.addPress("select@2+1"));
+	sys.setLiveButton(0, "start", true);
+	sys.applyInput(2);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x06);   // start (live) + select (scripted)
+	sys.applyInput(3);
+	EXPECT_EQ(sys.bus.i2c.controllerByte(0, 0), 0x02);
+}
+
+TEST(Viewer, RequestStopEndsTheRunAfterTheFrame)
+{
+	System sys(1u << 20);
+	// A tight loop at the reset PC: "j ." is not needed, the default run just executes
+	// whatever is in RAM (zeros = nop); we only need frames to elapse.
+	sys.reset(0);
+	uint64_t seen = 0;
+	const System::RunStats s = sys.run(0, 50000000, [&](const std::vector<PPU::Color>&, int, int, uint64_t n) {
+		seen = n;
+		if (n == 2) sys.requestStop();
+	});
+	EXPECT_EQ(s.reason, System::StopReason::UserStop);
+	EXPECT_EQ(seen, 2u);
+	EXPECT_EQ(s.frames, 3u);
+}
+
+TEST(Viewer, DebugHideRemovesTextLayersAndSprites)
+{
+	FlatMemory mem(0, 0x40000);
+	PPU ppu;
+	ppu.write32(PPU::P_PPU_Control, PPU::PPUEN_BIT | PPU::RES_QVGA);
+	// text layer 0 in bitmap RGB565 mode, every pixel pure red
+	ppu.write32(PPU::TEXT_BASE + PPU::TX_CTRL, PPU::TXC_TXE | PPU::TXC_LINR | PPU::TXC_RGB565);
+	ppu.write32(PPU::BUF_SA_BASE, 0x1000);
+	for (uint32_t i = 0; i < 512 * 256; ++i)
+		mem.writeHalf(0x1000 + i * 2, 0xF800);
+	EXPECT_EQ(ppu.samplePixel(mem, 5, 5, PPU::Color{ 1, 2, 3 }), (PPU::Color{ 255, 0, 0 }));
+	ppu.debugHide = 1;
+	EXPECT_EQ(ppu.samplePixel(mem, 5, 5, PPU::Color{ 1, 2, 3 }), (PPU::Color{ 1, 2, 3 }));
+	ppu.debugHide = 0;
+	EXPECT_EQ(ppu.samplePixel(mem, 5, 5, PPU::Color{ 1, 2, 3 }), (PPU::Color{ 255, 0, 0 }));
+}

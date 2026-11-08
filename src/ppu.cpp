@@ -292,7 +292,7 @@ PPU::Pixel PPU::fetchCharPixel(const PPUMemory &mem, uint32_t charBaseAddr,
 std::vector<PPU::SpriteRect> PPU::prepareSprites() const
 {
 	std::vector<SpriteRect> list;
-	if (!spriteEnabled())
+	if (!spriteEnabled() || (debugHide & HIDE_SPRITES))
 		return list;
 	int sw, sh;
 	screenSize(sw, sh);
@@ -339,6 +339,7 @@ PPU::Color PPU::samplePixelImpl(const PPUMemory &mem, int px, int py, Color back
 	{
 		uint32_t ctrl = textCtrl(layer);
 		if (!(ctrl & TXC_TXE)) continue;
+		if ((debugHide >> layer) & 1u) continue;
 
 		TextAttr attr = decodeAttr(textAttr(layer));
 
