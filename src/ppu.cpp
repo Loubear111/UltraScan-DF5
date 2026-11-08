@@ -14,6 +14,7 @@ void PPU::reset()
 {
 	m_ctrl.fill(0);
 	m_palette.fill(0);
+	m_spritePalette.fill(0);
 	m_hvoffset.fill(0);
 	m_hcomp.fill(0);
 	m_spriteNumX.fill(0);
@@ -31,6 +32,8 @@ uint32_t PPU::read32(uint32_t addr) const
 		return m_ctrl[(off >> 2) & 0x3F];
 	if (off >= PALETTE_BASE && off < PALETTE_BASE + 0x800)
 		return m_palette[(off - PALETTE_BASE) >> 2];
+	if (off >= SPRITE_PALETTE_BASE && off < SPRITE_PALETTE_BASE + 0x800)
+		return m_spritePalette[(off - SPRITE_PALETTE_BASE) >> 2];
 	if (off >= HVOFFSET_BASE && off < HVOFFSET_BASE + 0x800)
 		return m_hvoffset[(off - HVOFFSET_BASE) >> 2];
 	if (off >= HCOMP_BASE && off < HCOMP_BASE + 0x800)
@@ -55,6 +58,8 @@ void PPU::write32(uint32_t addr, uint32_t data)
 		m_ctrl[(off >> 2) & 0x3F] = data;
 	else if (off >= PALETTE_BASE && off < PALETTE_BASE + 0x800)
 		m_palette[(off - PALETTE_BASE) >> 2] = data;
+	else if (off >= SPRITE_PALETTE_BASE && off < SPRITE_PALETTE_BASE + 0x800)
+		m_spritePalette[(off - SPRITE_PALETTE_BASE) >> 2] = data;
 	else if (off >= HVOFFSET_BASE && off < HVOFFSET_BASE + 0x800)
 		m_hvoffset[(off - HVOFFSET_BASE) >> 2] = data;
 	else if (off >= HCOMP_BASE && off < HCOMP_BASE + 0x800)
@@ -268,7 +273,7 @@ void PPU::applyColorKey(Pixel &p) const
 
 PPU::Pixel PPU::fetchCharPixel(const PPUMemory &mem, uint32_t charBaseAddr,
                                uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch,
-                               ColorMode color, uint8_t palette, Flip flip) const
+                               ColorMode color, uint8_t palette, Flip flip, bool sprite) const
 {
 	applyFlip(flip, cx, cy, cw, ch);
 
@@ -281,10 +286,16 @@ PPU::Pixel PPU::fetchCharPixel(const PPUMemory &mem, uint32_t charBaseAddr,
 	uint32_t raw = mem.readByte(byteAddr);
 	if (shift + (uint32_t)bpp > 8)
 		raw |= (uint32_t)mem.readByte(byteAddr + 1) << 8;   // the pixel straddles two bytes
-	const uint32_t idx = (raw >> shift) & ((1u << bpp) - 1u);
+	uint32_t idx = (raw >> shift) & ((1u << bpp) - 1u);
+	// Sprites hold the earlier pixel in the HIGH bits of a byte (2 and 4 bpp), unlike the
+	// programming guide's section 9.4.5 (low bits first), which Ben 10's sprites contradict:
+	// low-first draws the Omnitrix logo with every pixel pair swapped. This matches MAME's
+	// spg290_ppu. Text-layer characters are left as the guide describes (unverified).
+	if (sprite && (bpp == 2 || bpp == 4))
+		idx = (raw >> (8 - (uint32_t)bpp - shift)) & ((1u << bpp) - 1u);
 
 	uint32_t entryIdx = paletteEntryIndex(palette, idx, color);
-	Pixel p = decodePaletteEntry(paletteRaw(entryIdx));
+	Pixel p = decodePaletteEntry(sprite ? spritePaletteRaw(entryIdx) : paletteRaw(entryIdx));
 	applyColorKey(p);
 	return p;
 }
@@ -375,35 +386,22 @@ PPU::Color PPU::samplePixelImpl(const PPUMemory &mem, int px, int py, Color back
 
 		if (ctrl & TXC_LINR)
 		{
-			// Bitmap mode: one 16-bit (high colour) or indexed pixel per
-			// position laid out as scan lines.
-			uint32_t base = textBufSA(layer, 0);
+			// Bitmap mode: one 16-bit pixel per position. Each scan line is found through
+			// the number-array pointer, which addresses a table of 32-bit row offsets in
+			// pixels (Ben 10: row r at r * 0x140 for a 320-pixel line). The format is
+			// RGB565 with TXC_RGB565, otherwise ARGB1555. The guide's indexed bitmap
+			// variant is gone: Ben 10 uses this mode with neither format flag set and
+			// the buffer holds 16-bit colours, not indices.
+			const uint32_t rowOff = mem.readWord(textNPtr(layer) + (uint32_t)iy * 4);
+			const uint16_t v = mem.readHalf(textBufSA(layer, 0) + (rowOff + (uint32_t)ix) * 2);
 			if (ctrl & TXC_RGB565)
 			{
-				uint16_t v = mem.readHalf(base + (uint32_t)(iy * virtW + ix) * 2);
 				pix.color = decodeRGB565(v);
 				pix.transparent = false;
 				applyColorKey(pix);
 			}
-			else if (ctrl & TXC_RGB555)
-			{
-				uint16_t v = mem.readHalf(base + (uint32_t)(iy * virtW + ix) * 2);
-				pix = decodeRGB555(v); // bit15 = transparency enable
-			}
 			else
-			{
-				int bpp = bitsPerPixel(attr.color);
-				uint64_t bitPos = (uint64_t)(iy * virtW + ix) * bpp;
-				uint32_t idx = 0;
-				for (int i = 0; i < bpp; i++)
-				{
-					uint64_t bp = bitPos + i;
-					uint8_t bit = (mem.readByte(base + (uint32_t)(bp >> 3)) >> (bp & 7)) & 1;
-					idx |= (uint32_t)bit << i;
-				}
-				pix = decodePaletteEntry(paletteRaw(paletteEntryIndex(attr.palette, idx, attr.color)));
-				applyColorKey(pix);
-			}
+				pix = decodeRGB555(v); // bit15 = transparency flag
 		}
 		else
 		{
@@ -449,7 +447,7 @@ PPU::Color PPU::samplePixelImpl(const PPUMemory &mem, int px, int py, Color back
 		uint32_t cxi = (uint32_t)(px - r.left);
 		uint32_t cyi = (uint32_t)(py - r.top);
 
-		Pixel pix = fetchCharPixel(mem, r.charAddr, cxi, cyi, r.w, r.h, s.color, s.palette, s.flip);
+		Pixel pix = fetchCharPixel(mem, r.charAddr, cxi, cyi, r.w, r.h, s.color, s.palette, s.flip, true);
 		if (pix.transparent) continue;
 
 		Fragment f;

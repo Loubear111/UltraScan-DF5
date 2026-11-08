@@ -159,7 +159,8 @@ public:
 		P_Frame_BUF_SA2 = 0x00CC,
 		P_SP_BUF_SA     = 0x00D0,
 
-		PALETTE_BASE  = 0x1000, // 512 entries, 4-byte stride
+		PALETTE_BASE  = 0x1000, // 512 entries, 4-byte stride (text layers)
+		SPRITE_PALETTE_BASE = 0x1800, // 512 entries, 4-byte stride (sprites)
 		HVOFFSET_BASE = 0x2000, // 512 per-line horizontal offsets
 		HCOMP_BASE    = 0x3000, // 512 per-line horizontal compression scales
 		SPRITE_BASE   = 0x4000, // 512 sprites, 8-byte stride (2 words each)
@@ -306,6 +307,9 @@ public:
 	// Palette entries (raw 16-bit values, 512 entries).
 	uint16_t paletteRaw(uint32_t i) const { return (uint16_t)(m_palette[i & 0x1FF] & 0xFFFF); }
 	void     setPaletteRaw(uint32_t i, uint16_t v) { m_palette[i & 0x1FF] = v; }
+	// Sprites have their own 512-entry palette at SPRITE_PALETTE_BASE (same entry layout).
+	uint16_t spritePaletteRaw(uint32_t i) const { return (uint16_t)(m_spritePalette[i & 0x1FF] & 0xFFFF); }
+	void     setSpritePaletteRaw(uint32_t i, uint16_t v) { m_spritePalette[i & 0x1FF] = v; }
 
 	uint16_t hvOffset(uint32_t line) const { return (uint16_t)(m_hvoffset[line & 0x1FF] & 0x3FF); }
 	uint16_t hCompValue(uint32_t line) const { return (uint16_t)(m_hcomp[line & 0x1FF] & 0x1FF); }
@@ -437,7 +441,8 @@ private:
 	// 0x000..0x0FC); the palette / per-line / sprite regions are separate
 	// arrays so the large offsets do not require a 20K backing array.
 	std::array<uint32_t, 64>  m_ctrl{};       // 0x0000 .. 0x00FC
-	std::array<uint32_t, 512> m_palette{};    // 0x1000 .. 0x17FC
+	std::array<uint32_t, 512> m_palette{};    // 0x1000 .. 0x17FC  (text layers)
+	std::array<uint32_t, 512> m_spritePalette{}; // 0x1800 .. 0x1FFC (sprites)
 	std::array<uint32_t, 512> m_hvoffset{};   // 0x2000 .. 0x27FC
 	std::array<uint32_t, 512> m_hcomp{};      // 0x3000 .. 0x37FC
 	std::array<uint32_t, 512> m_spriteNumX{}; // 0x4000 + 8*N
@@ -466,7 +471,7 @@ private:
 	// character of the given attributes, starting at `charBaseAddr` in DRAM.
 	Pixel fetchCharPixel(const PPUMemory &mem, uint32_t charBaseAddr,
 	                     uint32_t cx, uint32_t cy, uint32_t cw, uint32_t ch,
-	                     ColorMode color, uint8_t palette, Flip flip) const;
+	                     ColorMode color, uint8_t palette, Flip flip, bool sprite = false) const;
 
 	// Apply colour-key (P_Trans_RGB) transparency to an opaque pixel.
 	void applyColorKey(Pixel &p) const;

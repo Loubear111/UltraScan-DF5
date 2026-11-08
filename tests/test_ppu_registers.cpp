@@ -85,6 +85,23 @@ TEST(PPURegs, PpuEnabledByBit12AsBen10Writes)
 	EXPECT_FALSE(ppu.ppuEnabled());
 }
 
+// Sprites have their own palette block at 0x1800 (Ben 10 fills it; the text-layer block at
+// 0x1000 holds other data at the same time). Same layout: 512 entries, 4-byte stride.
+TEST(PPURegs, SpritePaletteIsSeparateFromTheTextPalette)
+{
+	PPU ppu;
+	ppu.write32(PPU::PALETTE_BASE + 4 * 5, 0x1234);
+	ppu.write32(PPU::SPRITE_PALETTE_BASE + 4 * 5, 0x5678);
+	EXPECT_EQ(ppu.read32(PPU::PALETTE_BASE + 4 * 5), 0x1234u);
+	EXPECT_EQ(ppu.read32(PPU::SPRITE_PALETTE_BASE + 4 * 5), 0x5678u);
+	EXPECT_EQ(ppu.paletteRaw(5), 0x1234);
+	EXPECT_EQ(ppu.spritePaletteRaw(5), 0x5678);
+	ppu.write32(PPU::SPRITE_PALETTE_BASE + 4 * 511, 0x7FFF);          // last entry of the block
+	EXPECT_EQ(ppu.spritePaletteRaw(511), 0x7FFF);
+	ppu.reset();
+	EXPECT_EQ(ppu.spritePaletteRaw(5), 0);
+}
+
 // --- P_PPU_Control ----------------------------------------------------------
 TEST(PPURegs, PpuEnableAndResolution)
 {

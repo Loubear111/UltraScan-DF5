@@ -75,6 +75,18 @@ void putPixel4(FlatMemory &mem, uint32_t charBase, int cw, int x, int y, uint8_t
 	mem.writeByte(addr, b);
 }
 
+// Sprite variant: sprites hold the earlier pixel in the HIGH nibble of a byte (see
+// PPU::fetchCharPixel), the opposite of the programming guide's text-layer description.
+void putSpritePixel4(FlatMemory &mem, uint32_t charBase, int cw, int x, int y, uint8_t idx)
+{
+	uint32_t bitPos = (uint32_t)(y * cw + x) * 4;
+	uint32_t addr = charBase + bitPos / 8;
+	uint8_t shift = (bitPos & 7) ? 0 : 4;   // first pixel of a byte -> high nibble
+	uint8_t b = mem.readByte(addr);
+	b = (uint8_t)((b & ~(0xF << shift)) | ((idx & 0xF) << shift));
+	mem.writeByte(addr, b);
+}
+
 // Render an 8x8 glyph scaled by `scale` into a (cw x cw) 4-bpp character.
 // Lit pixels become index 1, background index 0.
 void drawGlyph(FlatMemory &mem, uint32_t charBase, int cw, int scale, const uint8_t glyph[8])
@@ -94,7 +106,7 @@ void drawGlyph(FlatMemory &mem, uint32_t charBase, int cw, int scale, const uint
 TEST(PPURender, SingleSpriteDrawsRedBlock)
 {
 	PPU ppu = makeSpriteScene();
-	ppu.setPaletteRaw(1, RED555); // bank0, BPP4, index1 -> red
+	ppu.setSpritePaletteRaw(1, RED555); // bank0, BPP4, index1 -> red
 
 	FlatMemory mem(0, 0x4000);
 	// 8x8 BPP4 character #1 -> 32 bytes, all nibbles = index 1.
@@ -119,7 +131,7 @@ TEST(PPURender, DisabledPPUProducesBackdrop)
 {
 	PPU ppu = makeSpriteScene();
 	ppu.write32(PPU::P_PPU_Control, PPU::RES_QVGA); // PPUEN clear
-	ppu.setPaletteRaw(1, RED555);
+	ppu.setSpritePaletteRaw(1, RED555);
 
 	FlatMemory mem(0, 0x4000);
 	fillBytes(mem, 0x1000 + 1 * 32, 32, 0x11);
@@ -141,7 +153,7 @@ TEST(PPURender, CharNumZeroSpriteSkipped)
 {
 	PPU ppu = makeSpriteScene();
 	ppu.write32(PPU::P_SP_Max, 1); // enable sprites 0 and 1
-	ppu.setPaletteRaw(1, RED555);
+	ppu.setSpritePaletteRaw(1, RED555);
 	FlatMemory mem(0, 0x4000);
 	fillBytes(mem, 0x1000 + 1 * 32, 32, 0x11); // char #1 = solid red
 
@@ -165,14 +177,14 @@ TEST(PPURender, PaletteTransparentIndexShowsBackdrop)
 	PPU ppu = makeSpriteScene();
 	// Character #2: left half palette index 0 (marked transparent), right
 	// half index 1 (opaque red) so the transparency is visible.
-	ppu.setPaletteRaw(0, 0x8000); // Tr set -> transparent
-	ppu.setPaletteRaw(1, RED555);
+	ppu.setSpritePaletteRaw(0, 0x8000); // Tr set -> transparent
+	ppu.setSpritePaletteRaw(1, RED555);
 
 	FlatMemory mem(0, 0x4000);
 	uint32_t cbase = 0x1000 + 2 * 32;
 	for (int y = 0; y < 8; y++)
 		for (int x = 0; x < 8; x++)
-			putPixel4(mem, cbase, 8, x, y, x < 4 ? 0 : 1);
+			putSpritePixel4(mem, cbase, 8, x, y, x < 4 ? 0 : 1);
 	ppu.write32(PPU::SPRITE_BASE + 0, 2u | (5u << 16));
 	ppu.write32(PPU::SPRITE_BASE + 4, (1u << 0) | (7u << 16));
 
@@ -186,7 +198,7 @@ TEST(PPURender, PaletteTransparentIndexShowsBackdrop)
 TEST(PPURender, OpaqueIndexZeroDrawsColor)
 {
 	PPU ppu = makeSpriteScene();
-	ppu.setPaletteRaw(0, BLUE555); // Tr clear -> opaque blue
+	ppu.setSpritePaletteRaw(0, BLUE555); // Tr clear -> opaque blue
 
 	FlatMemory mem(0, 0x4000);
 	ppu.write32(PPU::SPRITE_BASE + 0, 2u | (5u << 16));
@@ -204,15 +216,15 @@ TEST(PPURender, ColorKeyMakesMatchingPixelTransparent)
 	PPU ppu = makeSpriteScene();
 	// Character #1: left half green (matches the colour key -> removed),
 	// right half blue (kept), so the effect is clearly visible.
-	ppu.setPaletteRaw(1, GREEN555);
-	ppu.setPaletteRaw(2, BLUE555);
+	ppu.setSpritePaletteRaw(1, GREEN555);
+	ppu.setSpritePaletteRaw(2, BLUE555);
 	ppu.write32(PPU::P_Trans_RGB, PPU::TRANS_RGB_EN_BIT | 0x07E0); // key = green565
 
 	FlatMemory mem(0, 0x4000);
 	uint32_t cbase = 0x1000 + 1 * 32;
 	for (int y = 0; y < 8; y++)
 		for (int x = 0; x < 8; x++)
-			putPixel4(mem, cbase, 8, x, y, x < 4 ? 1 : 2);
+			putSpritePixel4(mem, cbase, 8, x, y, x < 4 ? 1 : 2);
 	ppu.write32(PPU::SPRITE_BASE + 0, 1u | (5u << 16));
 	ppu.write32(PPU::SPRITE_BASE + 4, (1u << 0) | (7u << 16));
 
@@ -227,13 +239,13 @@ TEST(PPURender, ColorKeyMakesMatchingPixelTransparent)
 TEST(PPURender, HorizontalFlipMirrorsCharacter)
 {
 	PPU ppu = makeSpriteScene();
-	ppu.setPaletteRaw(0, 0x8000); // index0 transparent
-	ppu.setPaletteRaw(1, RED555); // index1 red
+	ppu.setSpritePaletteRaw(0, 0x8000); // index0 transparent
+	ppu.setSpritePaletteRaw(1, RED555); // index1 red
 
 	FlatMemory mem(0, 0x4000);
 	// char #1: only column 0 of each row is index1, rest index0.
 	for (int row = 0; row < 8; row++)
-		mem.writeByte(0x1000 + 1 * 32 + row * 4, 0x01);
+		mem.writeByte(0x1000 + 1 * 32 + row * 4, 0x10);   // pixel 0 is the high nibble for sprites
 
 	// Unflipped sprite 0 at (0,0).
 	ppu.write32(PPU::SPRITE_BASE + 0, 1u | (0u << 16));
@@ -260,8 +272,8 @@ TEST(PPURender, HigherDepthSpriteWins)
 {
 	PPU ppu = makeSpriteScene();
 	ppu.write32(PPU::P_SP_Max, 1); // sprites 0 and 1
-	ppu.setPaletteRaw(1, RED555);          // bank0 idx1 -> red
-	ppu.setPaletteRaw(16 + 1, GREEN555);   // bank1 idx1 -> green
+	ppu.setSpritePaletteRaw(1, RED555);          // bank0 idx1 -> red
+	ppu.setSpritePaletteRaw(16 + 1, GREEN555);   // bank1 idx1 -> green
 
 	FlatMemory mem(0, 0x4000);
 	fillBytes(mem, 0x1000 + 1 * 32, 32, 0x11); // char #1 solid index1
@@ -294,8 +306,8 @@ TEST(PPURender, BlendSpriteOverSprite)
 {
 	PPU ppu = makeSpriteScene();
 	ppu.write32(PPU::P_SP_Max, 1);
-	ppu.setPaletteRaw(1, RED555);
-	ppu.setPaletteRaw(16 + 1, GREEN555);
+	ppu.setSpritePaletteRaw(1, RED555);
+	ppu.setSpritePaletteRaw(16 + 1, GREEN555);
 
 	FlatMemory mem(0, 0x4000);
 	fillBytes(mem, 0x1000 + 1 * 32, 32, 0x11);
@@ -354,9 +366,13 @@ TEST(PPURender, TextBitmapRGB565)
 
 	ppu.write32(PPU::TEXT_BASE + PPU::TX_CTRL, PPU::TXC_TXE | PPU::TXC_LINR | PPU::TXC_RGB565);
 	ppu.write32(PPU::BUF_SA_BASE + 0, 0x3000); // bitmap base
+	ppu.write32(PPU::TEXT_BASE + PPU::TX_NPTR, 0x2000); // table of row offsets (in pixels)
 
 	FlatMemory mem(0, 0x40000);
 	int virtW = 512;
+	// Bitmap rows are found through the table (as Ben 10 does), one 32-bit offset per row.
+	for (int row = 0; row < 256; row++)
+		mem.writeWord(0x2000 + row * 4, (uint32_t)(row * virtW));
 	mem.writeHalf(0x3000 + (0 * virtW + 0) * 2, 0x07E0); // green565 at (0,0)
 	mem.writeHalf(0x3000 + (0 * virtW + 1) * 2, 0xF800); // red565 at (1,0)
 
@@ -365,6 +381,30 @@ TEST(PPURender, TextBitmapRGB565)
 	ppu_artifacts::dumpGiant("giant_text_bitmap_rgb565", fb, SCENE_W, SCENE_H, 0, 0, 16, 12, 40);
 	EXPECT_EQ(at(fb, 0, 0), GREEN);
 	EXPECT_EQ(at(fb, 1, 0), RED);
+}
+
+// Bitmap rows come from the offset table, not from a fixed pitch: rows may sit anywhere
+// and in any order (Ben 10 at frame 2700 uses row r at r * 0x140 for a 320-pixel line).
+// With neither format flag the 16-bit pixels are ARGB1555, bit 15 meaning transparent.
+TEST(PPURender, TextBitmapRowsUseTheOffsetTableAndDefaultToARGB1555)
+{
+	PPU ppu;
+	ppu.write32(PPU::P_PPU_Control, PPU::PPUEN_BIT | PPU::RES_QVGA);
+	ppu.write32(PPU::TEXT_BASE + PPU::TX_CTRL, PPU::TXC_TXE | PPU::TXC_LINR);
+	ppu.write32(PPU::BUF_SA_BASE + 0, 0x3000);
+	ppu.write32(PPU::TEXT_BASE + PPU::TX_NPTR, 0x2000);
+
+	FlatMemory mem(0, 0x40000);
+	mem.writeWord(0x2000 + 0 * 4, 100);   // row 0 starts 100 pixels into the buffer
+	mem.writeWord(0x2000 + 1 * 4, 0);     // row 1 starts at the buffer start
+	mem.writeHalf(0x3000 + 100 * 2, RED555);
+	mem.writeHalf(0x3000 + 0 * 2, GREEN555);
+	mem.writeHalf(0x3000 + 1 * 2, 0x8000 | BLUE555);   // transparent flag set
+
+	auto fb = ppu.renderFrame(mem, BACKDROP);
+	EXPECT_EQ(at(fb, 0, 0), RED);
+	EXPECT_EQ(at(fb, 0, 1), GREEN);
+	EXPECT_EQ(at(fb, 1, 1), BACKDROP);   // transparent pixel shows the backdrop
 }
 
 // --- Text scrolling wraps around the virtual screen -------------------------
