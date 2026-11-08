@@ -177,6 +177,9 @@ public:
 	// --- P_PPU_Control bit fields ------------------------------------
 	// PPUEN at bit 15, Resolution at bits 1:0.
 	static constexpr uint32_t PPUEN_BIT   = 1u << 15;
+	// The programming guide puts PPUEN at bit 15, but Ben 10 writes 0x1001 (bit 12) to
+	// enable the PPU, and MAME's spg290_ppu tests 0x1000 too. Either bit enables it.
+	static constexpr uint32_t PPUEN_BIT_GAME = 1u << 12;
 	static constexpr uint32_t RES_MASK    = 0x3u;
 
 	// --- P_SP_Control bit fields -------------------------------------
@@ -270,7 +273,7 @@ public:
 	bool hvLine()       const { return irqLine(IRQ_HV); }
 
 	// --- Typed global-register accessors -----------------------------
-	bool       ppuEnabled()  const { return (m_ctrl[P_PPU_Control / 4] & PPUEN_BIT) != 0; }
+	bool       ppuEnabled()  const { return (m_ctrl[P_PPU_Control / 4] & (PPUEN_BIT | PPUEN_BIT_GAME)) != 0; }
 	Resolution resolution()  const { return (Resolution)(m_ctrl[P_PPU_Control / 4] & RES_MASK); }
 	bool       spriteEnabled() const { return (m_ctrl[P_SP_Control / 4] & SP_EN_BIT) != 0; }
 	bool       coordTopLeft()  const { return (m_ctrl[P_SP_Control / 4] & COORD_SEL_BIT) != 0; }

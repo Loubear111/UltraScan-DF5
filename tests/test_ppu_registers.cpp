@@ -74,6 +74,17 @@ TEST(PPURegs, ResetClearsEverything)
 	EXPECT_EQ(ppu.read32(PPU::SPRITE_BASE), 0u);
 }
 
+// Ben 10 writes 0x1001 to P_PPU_Control (bit 12, not the guide's bit 15); MAME tests bit 12 too.
+TEST(PPURegs, PpuEnabledByBit12AsBen10Writes)
+{
+	PPU ppu;
+	ppu.write32(PPU::P_PPU_Control, 0x1001);
+	EXPECT_TRUE(ppu.ppuEnabled());
+	EXPECT_EQ(ppu.resolution(), PPU::RES_VGA);
+	ppu.write32(PPU::P_PPU_Control, 0x0001);
+	EXPECT_FALSE(ppu.ppuEnabled());
+}
+
 // --- P_PPU_Control ----------------------------------------------------------
 TEST(PPURegs, PpuEnableAndResolution)
 {
