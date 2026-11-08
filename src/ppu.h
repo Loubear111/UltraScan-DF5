@@ -408,6 +408,26 @@ public:
 	Color samplePixel(const PPUMemory &mem, int px, int py, Color backdrop) const;
 
 private:
+	// A sprite decoded once per frame, with its screen rectangle and character address.
+	struct SpriteRect
+	{
+		SpriteAttr s;
+		int      index = 0;
+		int      left = 0, top = 0, w = 0, h = 0;
+		uint32_t charAddr = 0;
+	};
+	// One candidate pixel from a layer, before depth sorting.
+	struct Fragment
+	{
+		LayerRef ref;
+		Color    color;
+		bool     blend = false;
+		uint8_t  level = 0;
+	};
+	std::vector<SpriteRect> prepareSprites() const;
+	Color samplePixelImpl(const PPUMemory &mem, int px, int py, Color backdrop,
+	                      const std::vector<SpriteRect> &sprites, std::vector<Fragment> &frags) const;
+
 	// Backing storage. The control block is word-addressed (offsets
 	// 0x000..0x0FC); the palette / per-line / sprite regions are separate
 	// arrays so the large offsets do not require a 20K backing array.

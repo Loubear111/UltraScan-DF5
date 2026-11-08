@@ -1,6 +1,8 @@
 #Compiler and Flags
 CXX = g++
-CXXFLAGS = -Wall -Wextra -std=c++17
+# Optimised by default: the emulator is several times faster at -O2 (make OPT=-O0 for a debug build).
+OPT ?= -O2
+CXXFLAGS = -Wall -Wextra -std=c++17 $(OPT)
 
 # Path to googletest build artifacts
 GTEST_LIB_DIR = ../third_party/googletest/build/lib

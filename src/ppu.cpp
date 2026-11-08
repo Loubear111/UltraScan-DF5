@@ -276,14 +276,12 @@ PPU::Pixel PPU::fetchCharPixel(const PPUMemory &mem, uint32_t charBaseAddr,
 	int bpp = bitsPerPixel(color);
 	uint64_t bitPos = (uint64_t)pixelIndex * bpp;
 
-	uint32_t idx = 0;
-	for (int i = 0; i < bpp; i++)
-	{
-		uint64_t bp = bitPos + i;
-		uint32_t byteAddr = charBaseAddr + (uint32_t)(bp >> 3);
-		uint8_t bit = (mem.readByte(byteAddr) >> (bp & 7)) & 1;
-		idx |= (uint32_t)bit << i;
-	}
+	const uint32_t shift = (uint32_t)(bitPos & 7);
+	const uint32_t byteAddr = charBaseAddr + (uint32_t)(bitPos >> 3);
+	uint32_t raw = mem.readByte(byteAddr);
+	if (shift + (uint32_t)bpp > 8)
+		raw |= (uint32_t)mem.readByte(byteAddr + 1) << 8;   // the pixel straddles two bytes
+	const uint32_t idx = (raw >> shift) & ((1u << bpp) - 1u);
 
 	uint32_t entryIdx = paletteEntryIndex(palette, idx, color);
 	Pixel p = decodePaletteEntry(paletteRaw(entryIdx));
@@ -291,27 +289,50 @@ PPU::Pixel PPU::fetchCharPixel(const PPUMemory &mem, uint32_t charBaseAddr,
 	return p;
 }
 
-// Internal fragment for per-pixel compositing.
-namespace
+std::vector<PPU::SpriteRect> PPU::prepareSprites() const
 {
-	struct Fragment
+	std::vector<SpriteRect> list;
+	if (!spriteEnabled())
+		return list;
+	int sw, sh;
+	screenSize(sw, sh);
+	const int maxSprite = (int)spriteMax();
+	for (int i = 0; i <= maxSprite && i < 512; i++)
 	{
-		PPU::LayerRef ref;
-		PPU::Color    color;
-		bool          blend = false;
-		uint8_t       level = 0;
-	};
+		SpriteRect r;
+		r.s = decodeSprite(i);
+		if (r.s.charNum == 0) continue; // transparent character
+		r.index = i;
+		r.w = sizeFromCode(r.s.hsizeCode);
+		r.h = sizeFromCode(r.s.vsizeCode);
+		r.left = r.s.x;
+		r.top  = r.s.y;
+		if (!coordTopLeft())
+		{
+			r.left = r.s.x + sw / 2;
+			r.top  = r.s.y + sh / 2;
+		}
+		const uint32_t charBytes = (uint32_t)r.w * r.h * bitsPerPixel(r.s.color) / 8;
+		r.charAddr = spriteBufSA() + (uint32_t)r.s.charNum * charBytes;
+		list.push_back(r);
+	}
+	return list;
 }
 
 PPU::Color PPU::samplePixel(const PPUMemory &mem, int px, int py, Color backdrop) const
 {
-	int sw, sh;
-	screenSize(sw, sh);
+	std::vector<SpriteRect> sprites = prepareSprites();
+	std::vector<Fragment> frags;
+	return samplePixelImpl(mem, px, py, backdrop, sprites, frags);
+}
+
+PPU::Color PPU::samplePixelImpl(const PPUMemory &mem, int px, int py, Color backdrop,
+                                const std::vector<SpriteRect> &sprites, std::vector<Fragment> &frags) const
+{
+	frags.clear();
 
 	int virtW = (resolution() == RES_VGA) ? 1024 : 512;
 	int virtH = (resolution() == RES_VGA) ? 512 : 256;
-
-	std::vector<Fragment> frags;
 
 	// ---- Text layers ------------------------------------------------
 	for (int layer = 0; layer < 3; layer++)
@@ -418,43 +439,24 @@ PPU::Color PPU::samplePixel(const PPUMemory &mem, int px, int py, Color backdrop
 	}
 
 	// ---- Sprites ----------------------------------------------------
-	if (spriteEnabled())
+	for (const SpriteRect &r : sprites)
 	{
-		int maxSprite = (int)spriteMax();
-		for (int i = 0; i <= maxSprite && i < 512; i++)
-		{
-			SpriteAttr s = decodeSprite(i);
-			if (s.charNum == 0) continue; // transparent character
+		const SpriteAttr &s = r.s;
+		if (px < r.left || px >= r.left + r.w || py < r.top || py >= r.top + r.h)
+			continue;
 
-			int w = sizeFromCode(s.hsizeCode);
-			int h = sizeFromCode(s.vsizeCode);
+		uint32_t cxi = (uint32_t)(px - r.left);
+		uint32_t cyi = (uint32_t)(py - r.top);
 
-			int left = s.x;
-			int top  = s.y;
-			if (!coordTopLeft())
-			{
-				left = s.x + sw / 2;
-				top  = s.y + sh / 2;
-			}
+		Pixel pix = fetchCharPixel(mem, r.charAddr, cxi, cyi, r.w, r.h, s.color, s.palette, s.flip);
+		if (pix.transparent) continue;
 
-			if (px < left || px >= left + w || py < top || py >= top + h)
-				continue;
-
-			uint32_t cxi = (uint32_t)(px - left);
-			uint32_t cyi = (uint32_t)(py - top);
-			uint32_t charBytes = (uint32_t)w * h * bitsPerPixel(s.color) / 8;
-			uint32_t charAddr = spriteBufSA() + (uint32_t)s.charNum * charBytes;
-
-			Pixel pix = fetchCharPixel(mem, charAddr, cxi, cyi, w, h, s.color, s.palette, s.flip);
-			if (pix.transparent) continue;
-
-			Fragment f;
-			f.ref = LayerRef{ true, s.depth, (uint16_t)i };
-			f.color = pix.color;
-			f.blend = s.blend;
-			f.level = s.blendLevel;
-			frags.push_back(f);
-		}
+		Fragment f;
+		f.ref = LayerRef{ true, s.depth, (uint16_t)r.index };
+		f.color = pix.color;
+		f.blend = s.blend;
+		f.level = s.blendLevel;
+		frags.push_back(f);
 	}
 
 	// ---- Composite bottom -> top -----------------------------------
@@ -481,9 +483,19 @@ std::vector<PPU::Color> PPU::renderFrame(const PPUMemory &mem, Color backdrop) c
 	if (!ppuEnabled())
 		return fb;
 
+	const std::vector<SpriteRect> sprites = prepareSprites();   // decoded once per frame
+	std::vector<SpriteRect> row;                                // the sprites that touch this scanline
+	std::vector<Fragment> frags;
+	frags.reserve(16);
 	for (int y = 0; y < h; y++)
+	{
+		row.clear();
+		for (const SpriteRect &r : sprites)
+			if (y >= r.top && y < r.top + r.h)
+				row.push_back(r);
 		for (int x = 0; x < w; x++)
-			fb[(size_t)y * w + x] = samplePixel(mem, x, y, backdrop);
+			fb[(size_t)y * w + x] = samplePixelImpl(mem, x, y, backdrop, row, frags);
+	}
 
 	return fb;
 }
