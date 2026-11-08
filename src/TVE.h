@@ -19,6 +19,12 @@ class Bus;
 //   0x08070000/04/08     TV start address 0/1/2 (read/write)
 //   0x08090020  buffer select: value & 3; 3 = framebuffer off (reset value)
 //
+// Evidence from Ben 10 on the real BIOS (story 34): it writes control 0x1105 (VGA, with the
+// PPU in VGA), later 0x1109 (HVGA, PPU in HVGA), toggles bit 0 once, and fades in with the
+// fade register 0xFF -> 0 (255 = black, matching the formula). It never touches the buffer
+// select or the start addresses 0x08070000-08, so the framebuffer path (and line doubling)
+// is not exercised by it. Bits 12 and 8 are set by the game; MAME ignores them. 0x08070060 is
+// NOT a TVE register: the BIOS writes it as a memory-controller/clock setting.
 // compose() builds one output frame: the PPU frame (if any), overwritten by the
 // RGB565 framebuffer chosen by the buffer select, then faded.
 // ============================================================================
