@@ -51,6 +51,11 @@ public:
 	virtual uint8_t  readByte(uint32_t addr) const = 0;
 	virtual uint16_t readHalf(uint32_t addr) const = 0;
 	virtual uint32_t readWord(uint32_t addr) const = 0;
+
+	// Optional fast path: a pointer to `len` consecutive bytes at `addr` (little-endian
+	// halfwords and words are then read straight from it), or null when the range is not
+	// contiguous plain memory. The renderer falls back to the read functions on null.
+	virtual const uint8_t *directSpan(uint32_t addr, uint32_t len) const { (void)addr; (void)len; return nullptr; }
 };
 
 // Simple flat little-endian DRAM model backed by a byte vector. Useful for
@@ -83,6 +88,12 @@ public:
 		writeByte(addr + 1, (uint8_t)((v >> 8) & 0xFF));
 		writeByte(addr + 2, (uint8_t)((v >> 16) & 0xFF));
 		writeByte(addr + 3, (uint8_t)((v >> 24) & 0xFF));
+	}
+
+	const uint8_t *directSpan(uint32_t addr, uint32_t len) const override
+	{
+		size_t i = index(addr);
+		return (i < m_bytes.size() && m_bytes.size() - i >= len) ? &m_bytes[i] : nullptr;
 	}
 
 	uint8_t readByte(uint32_t addr) const override
@@ -433,9 +444,36 @@ private:
 		bool     blend = false;
 		uint8_t  level = 0;
 	};
+	// Everything about a text layer that does not change within a frame.
+	struct TextLayerCtx
+	{
+		bool     on = false;                 // enabled and not hidden
+		bool     slow = false;               // vertical compression, or horizontal on layer 0: per-pixel source maths
+		bool     bitmap = false, rgb565 = false, wap = false, mve = false, blend = false;
+		uint32_t ctrl = 0, buf = 0, nptr = 0;
+		uint32_t cw = 8, ch = 8, charsPerRow = 1, charBytes = 0;
+		int32_t  tx = 0, ty = 0;
+		uint8_t  level = 0;
+		TextAttr attr;
+	};
+	// Frame-wide state plus per-scanline values refreshed when the row changes.
+	struct RenderState
+	{
+		int      virtW = 512, virtH = 256;
+		TextLayerCtx L[3];
+		int      row = -1;
+		int      iy[3] = { 0, 0, 0 };        // source row in the virtual screen
+		uint32_t rowOff[3] = { 0, 0, 0 };    // bitmap layers: row offset from the table
+		int      sxBase[3] = { 0, 0, 0 };    // source x = px + sxBase (before wrapping)
+		const uint8_t *rowPtr[3] = { nullptr, nullptr, nullptr };   // bitmap layers: this row's pixels, when directly readable
+	};
 	std::vector<SpriteRect> prepareSprites() const;
+	RenderState prepareState() const;
+	// `sprites` are the sprites to test at this pixel (the renderer passes only those that
+	// can cover it; each is still bounds-checked).
 	Color samplePixelImpl(const PPUMemory &mem, int px, int py, Color backdrop,
-	                      const std::vector<SpriteRect> &sprites, std::vector<Fragment> &frags) const;
+	                      const SpriteRect *const *sprites, size_t spriteCount,
+	                      std::vector<Fragment> &frags, RenderState &st) const;
 
 	// Backing storage. The control block is word-addressed (offsets
 	// 0x000..0x0FC); the palette / per-line / sprite regions are separate

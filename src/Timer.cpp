@@ -97,6 +97,26 @@ void TimerBlock::tick(uint32_t cpuCycles)
 	}
 }
 
+uint64_t TimerBlock::cyclesToEvent() const
+{
+	uint64_t best = ~0ull;
+	for (unsigned i = 0; i < CHANNELS; ++i)
+	{
+		const Channel& c = m_ch[i];
+		if (!c.clockOn || !(c.control & CTRL_ENABLE) || ((c.control2 >> 30) & 3u) != 0)
+			continue;
+		if (!(c.control & CTRL_IRQ_EN) || (c.control & CTRL_FLAG))
+			continue;                                         // a wrap would change nothing visible
+		const uint64_t cpt = cyclesPerTick(i);
+		const uint64_t steps = 0x10000u - (c.counter & 0xFFFFu);     // the wrap happens on this step
+		const uint64_t need = steps * cpt;
+		const uint64_t cycles = need > c.acc ? need - c.acc : 1;
+		if (cycles < best)
+			best = cycles;
+	}
+	return best;
+}
+
 bool TimerBlock::irq() const
 {
 	for (const Channel& c : m_ch)

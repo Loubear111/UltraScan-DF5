@@ -669,3 +669,55 @@ TEST(Viewer, DebugHideRemovesTextLayersAndSprites)
 	ppu.debugHide = 0;
 	EXPECT_EQ(ppu.samplePixel(mem, 5, 5, PPU::Color{ 1, 2, 3 }), (PPU::Color{ 255, 0, 0 }));
 }
+
+// ---- Lazy device time must behave exactly like per-instruction ticking -----------
+namespace {
+// A timer that wraps every 64 CPU cycles, acknowledged by a control write after each
+// interrupt like an ISR would. Returns the step at which each interrupt became active.
+std::vector<int> timerIrqTimeline(bool lazy, int steps)
+{
+	Bus bus(1u << 20);
+	bus.write32(0x880A0020u, 0);             // unmask every source
+	bus.write32(0x08160008u, 0xFFF0u);       // preload: 16 clocks per wrap
+	bus.write32(0x082100E4u, 0);             // divider 1: 4 CPU cycles per timer clock
+	bus.write32(0x0821006Cu, 3);             // clock on, load the counter from the preload
+	bus.write32(0x08160000u, 0x88000000u);   // enable + interrupt enable
+	std::vector<int> events;
+	for (int step = 0; step < steps; ++step)
+	{
+		if (lazy) bus.advance(6); else bus.tick(6);
+		if (bus.irqc.activeSource() == (int)IRQController::SRC_TIMER)
+		{
+			events.push_back(step);
+			bus.write32(0x08160000u, 0x88000000u);   // acknowledge (clears the flag)
+		}
+	}
+	return events;
+}
+} // namespace
+
+TEST(LazyTime, TimerInterruptsMatchEagerTickingAcrossAcknowledges)
+{
+	const std::vector<int> eager = timerIrqTimeline(false, 4000);
+	const std::vector<int> lazy  = timerIrqTimeline(true, 4000);
+	ASSERT_GT(eager.size(), 100u);          // many wrap/acknowledge rounds, not just the first
+	EXPECT_EQ(eager, lazy);
+}
+
+TEST(LazyTime, SyncBringsDevicesUpToDateAndRegisterReadsDoThemselves)
+{
+	Bus bus(1u << 20);
+	bus.write32(0x08160008u, 0xFFF0u);
+	bus.write32(0x082100E4u, 0);
+	bus.write32(0x0821006Cu, 3);
+	bus.write32(0x08160000u, 0x88000000u);
+	for (int i = 0; i < 5; ++i)
+		bus.advance(6);                         // 30 cycles: no wrap yet (64 needed)
+	EXPECT_FALSE(bus.timers.irq());
+	for (int i = 0; i < 10; ++i)
+		bus.advance(6);                         // 90 cycles in all: the wrap has to have happened
+	// advance() synced at the deadline, so the flag is already visible...
+	EXPECT_TRUE(bus.timers.irq());
+	// ...and a register read reports it too.
+	EXPECT_NE(bus.read32(0x08160000u) & (1u << 26), 0u);
+}

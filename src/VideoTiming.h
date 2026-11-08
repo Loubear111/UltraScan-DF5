@@ -52,6 +52,23 @@ public:
 		return events;
 	}
 
+	// CPU cycles until advance() could return an event: the end of the current line, or
+	// the H/V hit point if it lies later on this line. advance() calls compose as long as
+	// no call is stepped past this distance, which is what the Bus's batching guarantees.
+	uint32_t cyclesToEvent(uint32_t hvV, uint32_t hvH) const
+	{
+		uint32_t d = CPU_CYCLES_PER_LINE - lineCycle;
+		if (!hvFired && line == (hvV & 0x1FFu))
+		{
+			const uint32_t target = (hvH & 0x3FFu) * CPU_CYCLES_PER_PIXEL;
+			if (lineCycle >= target)
+				return 1;
+			if (target - lineCycle < d)
+				d = target - lineCycle;
+		}
+		return d ? d : 1;
+	}
+
 	uint32_t currentLine() const      { return line; }
 	uint32_t currentLineCycle() const { return lineCycle; }
 

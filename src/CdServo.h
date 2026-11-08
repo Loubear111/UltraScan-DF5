@@ -56,6 +56,16 @@ public:
 	// True once for every sector delivered since the last call (an interrupt edge).
 	bool takeIrq() { const bool r = m_irqEdge; m_irqEdge = false; return r; }
 
+	// CPU cycles until the next sector step (~0 when the drive is stopped or empty). Steps
+	// are the only time-driven changes, and tick() calls compose.
+	uint64_t cyclesToEvent() const
+	{
+		if (!m_timerOn)
+			return ~0ull;
+		const uint64_t p = periodCycles();
+		return p > m_acc ? p - m_acc : 1;
+	}
+
 	// Introspection for tests.
 	uint32_t bufferPointer() const { return m_bufPtr; }
 	uint32_t seekLba() const { return m_seekLba; }

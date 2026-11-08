@@ -32,6 +32,11 @@ public:
 	// to the program than here (CLI: --cycles-per-instr).
 	uint32_t cyclesPerInstruction = CYCLES_PER_INSTRUCTION;
 
+	// Bring the devices up to date lazily (Bus::advance) rather than after every
+	// instruction (Bus::tick). Both give the same result; the eager form is kept so the
+	// two can be compared.
+	bool lazyTime = true;
+
 	// Applied when a run is asked for no limit at all.
 	static constexpr uint64_t DEFAULT_INSTRUCTION_CAP = 100000000ull;
 

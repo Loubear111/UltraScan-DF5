@@ -3,6 +3,7 @@
 
 void System::reset(uint32_t entryPc)
 {
+	bus.sync();      // time still pending belongs to the machine being reset
 	bus.cpu.reset(entryPc);
 	bus.ppu.reset();
 	bus.irqc.reset();
@@ -14,6 +15,7 @@ void System::reset(uint32_t entryPc)
 	bus.frameReady = false;
 	m_totalFrames = 0;
 	bus.updateIRQ();
+	bus.sync();      // new device state: recompute the next deadline
 }
 
 namespace {
@@ -218,7 +220,8 @@ System::RunStats System::run(uint64_t maxFrames, uint64_t maxInstructions, const
 
 		if (!stubbed)
 			bus.cpu.clock();
-		bus.tick(cyclesPerInstruction);
+		if (lazyTime) bus.advance(cyclesPerInstruction);
+		else          bus.tick(cyclesPerInstruction);
 		++s.instructions;
 		s.cpuCycles += cyclesPerInstruction;
 
@@ -256,6 +259,7 @@ System::RunStats System::run(uint64_t maxFrames, uint64_t maxInstructions, const
 			break;
 		}
 	}
+	bus.sync();   // leave the devices exactly as eager ticking would have
 	return s;
 }
 

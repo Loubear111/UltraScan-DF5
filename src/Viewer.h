@@ -52,7 +52,8 @@ private:
 	int  m_speed = 1;              // 0 = 1x, 1 = 2x, 2 = max
 	uint64_t m_frameNo = 0;
 	int m_w = 0, m_h = 0;
-	std::vector<PPU::Color> m_last;
+	const std::vector<PPU::Color>* m_cur = nullptr;   // the frame being shown (valid only inside onFrame)
+	std::vector<PPU::Color> m_own;                    // a re-rendered frame after a layer toggle
 	std::vector<uint8_t> m_rgba;
 	unsigned m_snaps = 0;
 	bool m_held[32] = {};

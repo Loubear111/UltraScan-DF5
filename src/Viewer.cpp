@@ -123,16 +123,17 @@ void Viewer::handleKeys()
 	{
 		// Re-render the current state so the toggle shows even while paused.
 		int w = 0, h = 0;
-		m_last = m_sys.composeFrame(w, h);
-		upload(m_last, w, h);
+		m_own = m_sys.composeFrame(w, h);
+		m_cur = &m_own;
+		upload(m_own, w, h);
 	}
 
-	if (IsKeyPressed(KEY_P) && !m_last.empty())
+	if (IsKeyPressed(KEY_P) && m_cur && !m_cur->empty())
 	{
 		char name[96];
 		std::snprintf(name, sizeof(name), "/snap_%06llu_%02u.png", (unsigned long long)m_frameNo, m_snaps++);
 		const std::string path = m_snapDir + name;
-		if (frame_io::writePNG(path, m_last, m_w, m_h))
+		if (frame_io::writePNG(path, *m_cur, m_w, m_h))
 			std::printf("saved %s (%dx%d)\n", path.c_str(), m_w, m_h);
 		else
 			std::fprintf(stderr, "could not save %s\n", path.c_str());
@@ -196,8 +197,8 @@ void Viewer::onFrame(const std::vector<PPU::Color>& fb, int w, int h, uint64_t f
 	if (!m_ok)
 		return;
 	m_frameNo = frameNo;
-	m_last = fb;
-	upload(m_last, w, h);
+	m_cur = &fb;     // no copy: everything that needs the frame runs inside this call
+	upload(fb, w, h);
 
 	// "max" speed draws one frame in four so the emulation is not held up by the display.
 	const bool skip = (m_speed == 2) && !m_paused && (frameNo % 4 != 0);
@@ -209,6 +210,7 @@ void Viewer::onFrame(const std::vector<PPU::Color>& fb, int w, int h, uint64_t f
 	if (WindowShouldClose())
 	{
 		m_sys.requestStop();
+		m_cur = nullptr;
 		return;
 	}
 
@@ -218,6 +220,7 @@ void Viewer::onFrame(const std::vector<PPU::Color>& fb, int w, int h, uint64_t f
 		handleKeys();
 	}
 	m_step = false;
+	m_cur = nullptr;
 	if (WindowShouldClose())
 		m_sys.requestStop();
 }

@@ -59,6 +59,12 @@ public:
 	// True while any channel has its flag set with the interrupt enabled.
 	bool irq() const;
 
+	// CPU cycles until the next tick() could change irq(): the soonest counter wrap of a
+	// running channel that has the interrupt enabled and its flag clear (~0 when none).
+	// Counters are not readable, so nothing else about the block is observable between
+	// events; tick() calls compose, which lets the Bus batch them.
+	uint64_t cyclesToEvent() const;
+
 	// CPU cycles per timer clock for a channel under the current clock selection.
 	uint32_t cyclesPerTick(unsigned channel) const;
 

@@ -213,6 +213,7 @@ std::string Bus::unmappedSummary(size_t n) const
 // ---- MMIO word access (devices are word-granular) ------------------------
 uint32_t Bus::mmioRead32(uint32_t phys) const
 {
+	syncForAccess();   // device state must include all the time that has passed
 	if (inPPU(phys))
 		return ppu.read32(PPU::BASE + (phys - PPU_PHYS));
 	if (inIRQC(phys))
@@ -232,6 +233,7 @@ uint32_t Bus::mmioRead32(uint32_t phys) const
 
 void Bus::mmioWrite32(uint32_t phys, uint32_t data)
 {
+	syncForAccess();
 	if (inPPU(phys))
 		ppu.write32(PPU::BASE + (phys - PPU_PHYS), data);
 	else if (inIRQC(phys))
@@ -249,6 +251,7 @@ void Bus::mmioWrite32(uint32_t phys, uint32_t data)
 	else
 		return;   // MIU status and the dummy window ignore writes
 	updateIRQ();
+	recomputeDeadline();   // the write may have started, stopped or retimed a device
 }
 
 bool Bus::isLaneOnlyReg(uint32_t phys)
@@ -267,6 +270,11 @@ void Bus::mmioWriteLane(uint32_t phys, uint32_t data, uint32_t laneMask, unsigne
 
 void Bus::updateIRQ()
 {
+	// The cached levels must follow every push to the controller: an acknowledge write
+	// clears a device line here, and a stale "high" would hide the next rising edge from
+	// applyTime() until some later tick happened to refresh it.
+	m_timerIrq = timers.irq();
+	m_i2cIrq   = i2c.irq();
 	irqc.setSource(IRQController::SRC_PPU_VBLK_START, ppu.blkStartLine());
 	irqc.setSource(IRQController::SRC_PPU_HV_HIT,     ppu.hvLine());
 	irqc.setSource(IRQController::SRC_VBLK_END,       ppu.blkEndLine());
@@ -276,6 +284,35 @@ void Bus::updateIRQ()
 }
 
 void Bus::tick(uint32_t cpuCycles)
+{
+	m_pending += cpuCycles;
+	sync();
+}
+
+void Bus::sync()
+{
+	if (m_pending)
+	{
+		const uint32_t c = (uint32_t)m_pending;   // never more than a line's worth plus one instruction
+		m_pending = 0;
+		applyTime(c);
+	}
+	recomputeDeadline();
+}
+
+void Bus::recomputeDeadline()
+{
+	uint64_t d = video.cyclesToEvent(ppu.read32(PPU::P_IRQTMV), ppu.read32(PPU::P_IRQTMH));
+	const uint64_t t = timers.cyclesToEvent();
+	if (t < d) d = t;
+	const uint64_t i = i2c.cyclesToEvent();
+	if (i < d) d = i;
+	const uint64_t c = cdservo.cyclesToEvent();
+	if (c < d) d = c;
+	m_deadline = d ? d : 1;
+}
+
+void Bus::applyTime(uint32_t cpuCycles)
 {
 	timers.tick(cpuCycles);
 	i2c.tick(cpuCycles);

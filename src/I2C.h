@@ -38,6 +38,9 @@ public:
 	void tick(uint32_t cpuCycles);
 	bool irq() const { return (m_irqControl & 1u) != 0; }
 
+	// CPU cycles until a running transfer completes (~0 when idle). tick() calls compose.
+	uint64_t cyclesToEvent() const { return m_running ? (m_left ? m_left : 1) : ~0ull; }
+
 	// Controller inputs, as the controller reports them (active-high bits; the two
 	// analog axes are 0..255 with 0x7F centred). Nothing pressed by default.
 	static constexpr unsigned PORTS = 2;

@@ -91,6 +91,18 @@ public: // Devices on bus
 	// match the existing CPU/ROM test-harness convention.
 	std::vector<uint8_t> ram;
 
+	// Direct view of `len` bytes of RAM at `addr`, or null when they are not all plain RAM
+	// (a device, ROM, unmapped, or a wrap at the end of the RAM array). For bulk readers
+	// such as the PPU that would otherwise classify every byte.
+	const uint8_t* ramSpan(uint32_t addr, uint32_t len) const
+	{
+		const uint32_t p = addr & 0x1FFFFFFFu;
+		if (p >= RAM_LIMIT)
+			return nullptr;
+		const size_t idx = (size_t)p & (ram.size() - 1);
+		return idx + len <= ram.size() ? &ram[idx] : nullptr;
+	}
+
 	// Internal SRAM (SRAM_PHYS, SRAM_SIZE bytes).
 	std::vector<uint8_t> sram;
 
@@ -142,6 +154,25 @@ public: // Bus read/write, byte-addressed across the full 32-bit space.
 	// H-V events that fall inside. Runs even while the CPU sleeps, so a sleeping
 	// core can be woken by an interrupt.
 	void tick(uint32_t cpuCycles);
+
+	// Lazy form of tick(), used by the run loop: the time is only added up, and the
+	// devices (timers, I2C, CD servo, video counters) are brought up to date when one of
+	// them could next change something visible (their cyclesToEvent() deadline), before
+	// any access to a device register, and by sync(). The result is the same as calling
+	// tick() every instruction, at a fraction of the cost.
+	void advance(uint32_t cpuCycles)
+	{
+		m_pending += cpuCycles;
+		if (m_pending >= m_deadline)
+			sync();
+	}
+	// Apply all pending time to the devices and recompute the next deadline. Cheap when
+	// nothing is pending. Anything that inspects device state directly after a run
+	// (tests, tools) should call this first; register reads and writes through the Bus
+	// do it themselves.
+	void sync();
+	uint64_t pendingCycles() const  { return m_pending; }   // introspection for tests and tools
+	uint64_t deadlineCycles() const { return m_deadline; }
 
 	// True once per vblank start; reading it clears it. The driver renders a
 	// frame when it is set.
@@ -195,6 +226,11 @@ private:
 
 	struct UnmappedCount { uint64_t reads = 0; uint64_t writes = 0; };
 	mutable std::map<uint32_t, UnmappedCount> unmapped;   // key = physical page number
+	uint64_t m_pending = 0;                              // CPU cycles not yet applied to the devices
+	uint64_t m_deadline = 1;                             // apply them once this many have built up
+	void recomputeDeadline();
+	void applyTime(uint32_t cpuCycles);                  // the per-tick device update
+	void syncForAccess() const { if (m_pending) const_cast<Bus*>(this)->sync(); }
 	bool m_timerIrq = false;
 	bool m_i2cIrq = false;                               // last timer line level pushed to the IRQ controller
 	void logUnmapped(uint32_t p, bool write, uint32_t value, uint8_t size) const;
@@ -223,9 +259,23 @@ class BusMemory : public PPUMemory
 {
 public:
 	explicit BusMemory(const Bus& b) : bus(b) {}
-	uint8_t  readByte(uint32_t a) const override { return bus.read8(a); }
-	uint16_t readHalf(uint32_t a) const override { return (uint16_t)(readByte(a) | (readByte(a + 1) << 8)); }
-	uint32_t readWord(uint32_t a) const override { return (uint32_t)readHalf(a) | ((uint32_t)readHalf(a + 2) << 16); }
+	const uint8_t *directSpan(uint32_t a, uint32_t len) const override { return bus.ramSpan(a, len); }
+	uint8_t  readByte(uint32_t a) const override
+	{
+		if (const uint8_t* s = bus.ramSpan(a, 1)) return s[0];
+		return bus.read8(a);
+	}
+	uint16_t readHalf(uint32_t a) const override
+	{
+		if (const uint8_t* s = bus.ramSpan(a, 2)) return (uint16_t)(s[0] | (s[1] << 8));
+		return (uint16_t)(readByte(a) | (readByte(a + 1) << 8));
+	}
+	uint32_t readWord(uint32_t a) const override
+	{
+		if (const uint8_t* s = bus.ramSpan(a, 4))
+			return (uint32_t)s[0] | ((uint32_t)s[1] << 8) | ((uint32_t)s[2] << 16) | ((uint32_t)s[3] << 24);
+		return (uint32_t)readHalf(a) | ((uint32_t)readHalf(a + 2) << 16);
+	}
 
 private:
 	const Bus& bus;

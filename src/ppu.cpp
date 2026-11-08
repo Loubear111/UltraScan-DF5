@@ -330,61 +330,127 @@ std::vector<PPU::SpriteRect> PPU::prepareSprites() const
 	return list;
 }
 
+PPU::RenderState PPU::prepareState() const
+{
+	RenderState st;
+	st.virtW = (resolution() == RES_VGA) ? 1024 : 512;
+	st.virtH = (resolution() == RES_VGA) ? 512 : 256;
+	for (int layer = 0; layer < 3; layer++)
+	{
+		TextLayerCtx &c = st.L[layer];
+		c.ctrl = textCtrl(layer);
+		c.on = (c.ctrl & TXC_TXE) && !((debugHide >> layer) & 1u);
+		if (!c.on)
+			continue;
+		c.attr   = decodeAttr(textAttr(layer));
+		c.tx     = textX(layer);
+		c.ty     = textY(layer);
+		c.buf    = textBufSA(layer, 0);
+		c.nptr   = textNPtr(layer);
+		c.bitmap = (c.ctrl & TXC_LINR) != 0;
+		c.rgb565 = (c.ctrl & TXC_RGB565) != 0;
+		c.wap    = (c.ctrl & TXC_WAP) != 0;
+		c.mve    = (c.ctrl & TXC_MVE) != 0;
+		c.blend  = (c.ctrl & TXC_BLEND) != 0;
+		c.level  = (uint8_t)textBlendLevel(layer);
+		c.slow   = (c.ctrl & TXC_VCMP) != 0 || ((c.ctrl & TXC_HCMP) && layer == 0);
+		c.cw = (uint32_t)sizeFromCode(c.attr.hsizeCode);
+		c.ch = (uint32_t)sizeFromCode(c.attr.vsizeCode);
+		c.charsPerRow = c.cw ? (uint32_t)st.virtW / c.cw : 1;
+		c.charBytes = c.cw * c.ch * (uint32_t)bitsPerPixel(c.attr.color) / 8;
+	}
+	return st;
+}
+
 PPU::Color PPU::samplePixel(const PPUMemory &mem, int px, int py, Color backdrop) const
 {
 	std::vector<SpriteRect> sprites = prepareSprites();
+	std::vector<const SpriteRect *> ptrs;
+	for (const SpriteRect &r : sprites)
+		ptrs.push_back(&r);
 	std::vector<Fragment> frags;
-	return samplePixelImpl(mem, px, py, backdrop, sprites, frags);
+	RenderState st = prepareState();
+	return samplePixelImpl(mem, px, py, backdrop, ptrs.data(), ptrs.size(), frags, st);
 }
 
 PPU::Color PPU::samplePixelImpl(const PPUMemory &mem, int px, int py, Color backdrop,
-                                const std::vector<SpriteRect> &sprites, std::vector<Fragment> &frags) const
+                                const SpriteRect *const *sprites, size_t spriteCount,
+                                std::vector<Fragment> &frags, RenderState &st) const
 {
 	frags.clear();
 
-	int virtW = (resolution() == RES_VGA) ? 1024 : 512;
-	int virtH = (resolution() == RES_VGA) ? 512 : 256;
+	const int virtW = st.virtW;
+	const int virtH = st.virtH;
+
+	// Per-scanline values. The virtual screen sizes are powers of two, so wrapping is a mask
+	// (the same as ((v % n) + n) % n for negative v too).
+	if (st.row != py)
+	{
+		st.row = py;
+		for (int layer = 0; layer < 3; layer++)
+		{
+			const TextLayerCtx &c = st.L[layer];
+			if (!c.on || c.slow)
+				continue;
+			const int iy = (py + c.ty) & (virtH - 1);
+			st.iy[layer] = iy;
+			st.sxBase[layer] = c.tx + (c.mve ? (int)hvOffset((uint32_t)(py & (virtH - 1))) : 0);
+			st.rowOff[layer] = c.bitmap ? mem.readWord(c.nptr + (uint32_t)iy * 4) : 0;
+			// A bitmap row is virtW consecutive 16-bit pixels (the x index wraps inside it).
+			st.rowPtr[layer] = c.bitmap ? mem.directSpan(c.buf + st.rowOff[layer] * 2, (uint32_t)virtW * 2) : nullptr;
+		}
+	}
 
 	// ---- Text layers ------------------------------------------------
 	for (int layer = 0; layer < 3; layer++)
 	{
-		uint32_t ctrl = textCtrl(layer);
-		if (!(ctrl & TXC_TXE)) continue;
-		if ((debugHide >> layer) & 1u) continue;
+		const TextLayerCtx &c = st.L[layer];
+		if (!c.on) continue;
 
-		TextAttr attr = decodeAttr(textAttr(layer));
-
-		// Source coordinate in the (wrapping) virtual screen.
-		double sx = (double)px + (double)textX(layer);
-		double sy = (double)py + (double)textY(layer);
-
-		// Per-line horizontal movement.
-		if (ctrl & TXC_MVE)
-			sx += (double)hvOffset((uint32_t)((py % virtH + virtH) % virtH));
-
-		// Vertical compression / extension (whole layer).
-		if (ctrl & TXC_VCMP)
+		int ix, iy;
+		uint32_t rowOff = 0;
+		if (!c.slow)
 		{
-			uint32_t vval = read32(P_VComp_Value) ? read32(P_VComp_Value) : VCMP_UNIT;
-			sy = (double)read32(P_VComp_Offset) + (double)py * verticalSourceStep(vval);
+			ix = (px + st.sxBase[layer]) & (virtW - 1);
+			iy = st.iy[layer];
+			rowOff = st.rowOff[layer];
 		}
-		// Horizontal compression (text1 only).
-		if ((ctrl & TXC_HCMP) && layer == 0)
+		else
 		{
-			uint32_t hval = hCompValue((uint32_t)((py % virtH + virtH) % virtH));
-			if (hval == 0) hval = HCMP_UNIT;
-			sx = (double)px * horizontalSourceStep(hval) + (double)textX(layer);
-		}
+			// Source coordinate in the (wrapping) virtual screen.
+			double sx = (double)px + (double)c.tx;
+			double sy = (double)py + (double)c.ty;
 
-		int ix = (int)std::floor(sx);
-		int iy = (int)std::floor(sy);
-		ix = ((ix % virtW) + virtW) % virtW;
-		iy = ((iy % virtH) + virtH) % virtH;
+			// Per-line horizontal movement.
+			if (c.mve)
+				sx += (double)hvOffset((uint32_t)((py % virtH + virtH) % virtH));
+
+			// Vertical compression / extension (whole layer).
+			if (c.ctrl & TXC_VCMP)
+			{
+				uint32_t vval = read32(P_VComp_Value) ? read32(P_VComp_Value) : VCMP_UNIT;
+				sy = (double)read32(P_VComp_Offset) + (double)py * verticalSourceStep(vval);
+			}
+			// Horizontal compression (text1 only).
+			if ((c.ctrl & TXC_HCMP) && layer == 0)
+			{
+				uint32_t hval = hCompValue((uint32_t)((py % virtH + virtH) % virtH));
+				if (hval == 0) hval = HCMP_UNIT;
+				sx = (double)px * horizontalSourceStep(hval) + (double)c.tx;
+			}
+
+			ix = (int)std::floor(sx);
+			iy = (int)std::floor(sy);
+			ix = ((ix % virtW) + virtW) % virtW;
+			iy = ((iy % virtH) + virtH) % virtH;
+			if (c.bitmap)
+				rowOff = mem.readWord(c.nptr + (uint32_t)iy * 4);
+		}
 
 		Pixel pix;
 		pix.transparent = true;
 
-		if (ctrl & TXC_LINR)
+		if (c.bitmap)
 		{
 			// Bitmap mode: one 16-bit pixel per position. Each scan line is found through
 			// the number-array pointer, which addresses a table of 32-bit row offsets in
@@ -392,9 +458,12 @@ PPU::Color PPU::samplePixelImpl(const PPUMemory &mem, int px, int py, Color back
 			// RGB565 with TXC_RGB565, otherwise ARGB1555. The guide's indexed bitmap
 			// variant is gone: Ben 10 uses this mode with neither format flag set and
 			// the buffer holds 16-bit colours, not indices.
-			const uint32_t rowOff = mem.readWord(textNPtr(layer) + (uint32_t)iy * 4);
-			const uint16_t v = mem.readHalf(textBufSA(layer, 0) + (rowOff + (uint32_t)ix) * 2);
-			if (ctrl & TXC_RGB565)
+			uint16_t v;
+			if (const uint8_t *rp = c.slow ? nullptr : st.rowPtr[layer])
+				v = (uint16_t)(rp[ix * 2] | (rp[ix * 2 + 1] << 8));
+			else
+				v = mem.readHalf(c.buf + (rowOff + (uint32_t)ix) * 2);
+			if (c.rgb565)
 			{
 				pix.color = decodeRGB565(v);
 				pix.transparent = false;
@@ -406,40 +475,37 @@ PPU::Color PPU::samplePixelImpl(const PPUMemory &mem, int px, int py, Color back
 		else
 		{
 			// Character mode.
-			uint32_t cw = sizeFromCode(attr.hsizeCode);
-			uint32_t ch = sizeFromCode(attr.vsizeCode);
-			uint32_t charsPerRow = (cw ? (uint32_t)virtW / cw : 1);
+			const uint32_t cw = c.cw, ch = c.ch;
+			const uint32_t col = (uint32_t)ix / cw;
+			const uint32_t row = (uint32_t)iy / ch;
+			const uint32_t cxi = (uint32_t)ix % cw;
+			const uint32_t cyi = (uint32_t)iy % ch;
 
-			uint32_t col = (uint32_t)ix / cw;
-			uint32_t row = (uint32_t)iy / ch;
-			uint32_t cxi = (uint32_t)ix % cw;
-			uint32_t cyi = (uint32_t)iy % ch;
-
-			uint32_t arrayIndex = (ctrl & TXC_WAP) ? 0 : (row * charsPerRow + col);
-			uint16_t charNum = mem.readHalf(textNPtr(layer) + arrayIndex * 2);
+			const uint32_t arrayIndex = c.wap ? 0 : (row * c.charsPerRow + col);
+			const uint16_t charNum = mem.readHalf(c.nptr + arrayIndex * 2);
 
 			if (charNum != 0)
 			{
-				uint32_t charBytes = cw * ch * bitsPerPixel(attr.color) / 8;
-				uint32_t charAddr = textBufSA(layer, 0) + (uint32_t)charNum * charBytes;
-				pix = fetchCharPixel(mem, charAddr, cxi, cyi, cw, ch, attr.color, attr.palette, attr.flip);
+				const uint32_t charAddr = c.buf + (uint32_t)charNum * c.charBytes;
+				pix = fetchCharPixel(mem, charAddr, cxi, cyi, cw, ch, c.attr.color, c.attr.palette, c.attr.flip);
 			}
 		}
 
 		if (!pix.transparent)
 		{
 			Fragment f;
-			f.ref = LayerRef{ false, attr.depth, (uint16_t)layer };
+			f.ref = LayerRef{ false, c.attr.depth, (uint16_t)layer };
 			f.color = pix.color;
-			f.blend = (ctrl & TXC_BLEND) != 0;
-			f.level = (uint8_t)textBlendLevel(layer);
+			f.blend = c.blend;
+			f.level = c.level;
 			frags.push_back(f);
 		}
 	}
 
 	// ---- Sprites ----------------------------------------------------
-	for (const SpriteRect &r : sprites)
+	for (size_t si = 0; si < spriteCount; ++si)
 	{
+		const SpriteRect &r = *sprites[si];
 		const SpriteAttr &s = r.s;
 		if (px < r.left || px >= r.left + r.w || py < r.top || py >= r.top + r.h)
 			continue;
@@ -459,8 +525,19 @@ PPU::Color PPU::samplePixelImpl(const PPUMemory &mem, int px, int py, Color back
 	}
 
 	// ---- Composite bottom -> top -----------------------------------
-	std::sort(frags.begin(), frags.end(),
-	          [](const Fragment &a, const Fragment &b) { return isAbove(b.ref, a.ref); });
+	// Insertion sort: there are only a few fragments, and every layer reference is unique
+	// (a layer or sprite index), so the order is the same as std::sort would give.
+	for (size_t k = 1; k < frags.size(); ++k)
+	{
+		const Fragment f = frags[k];
+		size_t m = k;
+		while (m > 0 && isAbove(frags[m - 1].ref, f.ref))
+		{
+			frags[m] = frags[m - 1];
+			--m;
+		}
+		frags[m] = f;
+	}
 
 	Color out = backdrop;
 	for (const Fragment &f : frags)
@@ -483,17 +560,39 @@ std::vector<PPU::Color> PPU::renderFrame(const PPUMemory &mem, Color backdrop) c
 		return fb;
 
 	const std::vector<SpriteRect> sprites = prepareSprites();   // decoded once per frame
-	std::vector<SpriteRect> row;                                // the sprites that touch this scanline
+	std::vector<const SpriteRect *> row;                        // the sprites that touch this scanline, by left edge
+	std::vector<const SpriteRect *> active;                     // those covering the current pixel
 	std::vector<Fragment> frags;
 	frags.reserve(16);
+	RenderState st = prepareState();
 	for (int y = 0; y < h; y++)
 	{
 		row.clear();
 		for (const SpriteRect &r : sprites)
 			if (y >= r.top && y < r.top + r.h)
-				row.push_back(r);
+				row.push_back(&r);
+		std::stable_sort(row.begin(), row.end(),
+		                 [](const SpriteRect *a, const SpriteRect *b) { return a->left < b->left; });
+		size_t next = 0;
+		active.clear();
 		for (int x = 0; x < w; x++)
-			fb[(size_t)y * w + x] = samplePixelImpl(mem, x, y, backdrop, row, frags);
+		{
+			// Sweep: a sprite joins the active set at its left edge and leaves after its right
+			// edge. The order inside the set does not matter (fragments are depth-sorted).
+			while (next < row.size() && row[next]->left <= x)
+				active.push_back(row[next++]);
+			for (size_t k = 0; k < active.size();)
+			{
+				if (active[k]->left + active[k]->w <= x)
+				{
+					active[k] = active.back();
+					active.pop_back();
+				}
+				else
+					++k;
+			}
+			fb[(size_t)y * w + x] = samplePixelImpl(mem, x, y, backdrop, active.data(), active.size(), frags, st);
+		}
 	}
 
 	return fb;
