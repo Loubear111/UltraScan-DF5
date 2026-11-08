@@ -1998,6 +1998,8 @@ void spg290::takeInterrupt()
     uint8_t vector = irqVector;
     enterException(EXC_INT, pc, irqVectorAddr(vector));
     cr[2] = (cr[2] & ~ECR_VECTOR_MASK) | ((uint32_t)vector << ECR_VECTOR_SHIFT);
+    if (onIrqTaken)
+        onIrqTaken(vector);
 }
 
 // trap{cond}: raise a trap exception when the condition holds, otherwise it is

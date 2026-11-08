@@ -7,6 +7,7 @@ void IRQController::reset()
 	m_pmst  = 0;
 	for (auto &p : m_pslv) p = 0;
 	m_swi    = false;
+	m_edge   = 0;
 	m_winner = -1;
 }
 
@@ -21,8 +22,27 @@ void IRQController::setSource(unsigned source, bool level)
 {
 	if (source >= NUM_SOURCES) return;
 	if (level) m_lines |= 1ull << source;
-	else       m_lines &= ~(1ull << source);
+	else       { m_lines &= ~(1ull << source); m_edge &= ~(1ull << source); }
 	arbitrate();
+}
+
+void IRQController::pulse(unsigned source)
+{
+	if (source >= NUM_SOURCES) return;
+	m_lines |= 1ull << source;
+	m_edge  |= 1ull << source;
+	arbitrate();
+}
+
+bool IRQController::acknowledge(uint8_t vector)
+{
+	if (vector > 63) return false;
+	const unsigned source = 63u - vector;
+	if (source >= NUM_SOURCES || !(m_edge & (1ull << source))) return false;
+	m_lines &= ~(1ull << source);
+	m_edge  &= ~(1ull << source);
+	arbitrate();
+	return true;
 }
 
 // Lowest (group priority, source priority, source number) wins; 000 is the

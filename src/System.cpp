@@ -6,6 +6,9 @@ void System::reset(uint32_t entryPc)
 	bus.ppu.reset();
 	bus.irqc.reset();
 	bus.tve.reset();
+	bus.timers.reset();
+	bus.i2c.reset();
+	bus.cdservo.reset();
 	bus.video.reset();
 	bus.frameReady = false;
 	bus.updateIRQ();
@@ -21,6 +24,21 @@ bool System::boot(const uint8_t* data, size_t size, const BootParams& params)
 		return false;
 	reset(params.entryPc);
 	return bootExecutable(bus, data, size, params);
+}
+
+bool System::bootBios(const uint8_t* data, size_t size, uint32_t resetPc)
+{
+	if (size == 0 || !bus.loadImage(data, size, Bus::ROM_PHYS))
+		return false;
+	bus.setLittleEndian(true);
+	uint32_t mirror = 1;
+	while (mirror < size)
+		mirror <<= 1;                  // a 1 MiB BIOS repeats every 1 MiB
+	bus.romMirror = mirror;
+	reset(resetPc);
+	bus.cpu.cr[3] = resetPc;                       // EXCPVEC = PC at reset (MAME)
+	bus.cpu.cr[29] = DREG_JTAG_DISABLED;           // MAME's driver sets this at machine reset
+	return true;
 }
 
 System::RunStats System::run(uint64_t maxFrames, uint64_t maxInstructions, const FrameCallback& onFrame)
@@ -92,9 +110,9 @@ System::RunStats System::run(uint64_t maxFrames, uint64_t maxInstructions, const
 
 		if (!stubbed)
 			bus.cpu.clock();
-		bus.tick(CYCLES_PER_INSTRUCTION);
+		bus.tick(cyclesPerInstruction);
 		++s.instructions;
-		s.cpuCycles += CYCLES_PER_INSTRUCTION;
+		s.cpuCycles += cyclesPerInstruction;
 
 		if (bus.cpu.stopRequested())
 		{

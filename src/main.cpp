@@ -22,6 +22,9 @@ void usage(const char* argv0)
 {
 	std::fprintf(stderr,
 		"usage: %s <disc.cue|disc.iso|HYPER.EXE|image.bin> [options]\n"
+		"       %s --bios <bios.bin> [disc.cue] [options]   (boot from a BIOS dump)\n"
+		"  --bios FILE         boot from this BIOS image, mapped at 0x10000000, little-endian\n"
+		"  --reset-pc ADDR     with --bios: start PC and cr3 (default 0x9F000000, as in MAME)\n"
 		"  --exe NAME          file to run from a disc image (default HYPER.EXE)\n"
 		"  --raw               load the file as a flat binary instead of reading a disc image\n"
 		"  --load ADDR         load address (default 0xA00901FC)\n"
@@ -37,12 +40,14 @@ void usage(const char* argv0)
 		"  --trace N           print the last N executed instructions at the end\n"
 		"  --stop-on-unimpl    stop at the first undefined/unimplemented instruction\n"
 		"  --stop-on-hang      stop when the program branches to itself in a loop\n"
+		"  --cycles-per-instr N  CPU cycles charged per instruction (default 6; MAME charges 1)\n"
+		"  --log-io N          keep and print the first N unmapped accesses (address, value, PC)\n"
 		"  --log-calls         list calls the program makes into the BIOS area 0x800-0x8FFFF\n"
 		"  --stop-on-call      stop at the first such call (implies --log-calls)\n"
 		"  --stub-calls        answer such calls with r4 = 0 and carry on (implies --log-calls)\n"
 		"  --stub-ramp N       with --stub-calls: answer the k-th call to a target with k*N (default 0)\n"
 		"ADDR/VALUE accept 0x hex or decimal.\n",
-		argv0);
+		argv0, argv0);
 }
 
 struct Options
@@ -64,6 +69,10 @@ struct Options
 	bool stopOnCall = false;
 	bool stubCalls = false;
 	uint32_t stubRamp = 0;
+	size_t logIo = 0;
+	uint32_t cyclesPerInstr = System::CYCLES_PER_INSTRUCTION;
+	std::string bios;
+	uint32_t resetPc = System::BIOS_RESET_PC;
 };
 
 bool parseNumber(const std::string& s, unsigned long long& out)
@@ -107,6 +116,14 @@ bool parseArgs(int argc, char** argv, Options& o)
 			if (i + 1 >= argc) { std::fprintf(stderr, "--out needs a folder\n"); return false; }
 			o.outDir = argv[++i];
 		}
+		else if (a == "--bios")
+		{
+			if (i + 1 >= argc) { std::fprintf(stderr, "--bios needs a file\n"); return false; }
+			o.bios = argv[++i];
+		}
+		else if (a == "--cycles-per-instr") { if (!value(v) || v == 0) return false; o.cyclesPerInstr = (uint32_t)v; }
+		else if (a == "--log-io")         { if (!value(v)) return false; o.logIo = (size_t)v; }
+		else if (a == "--reset-pc")       { if (!value(v)) return false; o.resetPc = (uint32_t)v; }
 		else if (a == "--raw")            o.raw = true;
 		else if (a == "--little-endian")  o.boot.littleEndian = true;
 		else if (a == "--big-endian")     o.boot.littleEndian = false;
@@ -138,7 +155,7 @@ bool parseArgs(int argc, char** argv, Options& o)
 			return false;
 		}
 	}
-	if (o.input.empty())
+	if (o.input.empty() && o.bios.empty())
 		return false;
 	if (o.ramMiB == 0 || (o.ramMiB & (o.ramMiB - 1)) != 0 || o.ramMiB > 128)
 	{
@@ -157,6 +174,73 @@ bool readWholeFile(const std::string& path, std::vector<uint8_t>& out)
 	return !out.empty();
 }
 
+int runAndReport(System& sys, const Options& o)
+{
+	sys.bus.ioLogLimit = o.logIo;
+	sys.cyclesPerInstruction = o.cyclesPerInstr;
+	uint64_t written = 0;
+	auto onFrame = [&](const std::vector<PPU::Color>& fb, int w, int h, uint64_t n) {
+		if (n % o.every != 0)
+			return;
+		char name[64];
+		std::snprintf(name, sizeof(name), "frame_%06llu.bmp", (unsigned long long)n);
+		const std::string path = o.outDir + "/" + name;
+		if (frame_io::writeBMP(path, fb, w, h))
+		{
+			std::printf("wrote %s (%dx%d)\n", path.c_str(), w, h);
+			++written;
+		}
+		else
+			std::fprintf(stderr, "could not write %s\n", path.c_str());
+	};
+
+	const System::RunStats s = sys.run(o.frames, o.maxInstr, onFrame);
+
+	std::printf("frames %llu, instructions %llu, CPU cycles %llu, stopped by %s, final pc 0x%08X\n",
+	            (unsigned long long)s.frames, (unsigned long long)s.instructions,
+	            (unsigned long long)s.cpuCycles, System::stopReasonName(s.reason), sys.bus.cpu.pc);
+
+	if (!sys.bus.uartOutput.empty())
+		std::printf("UART output (%zu bytes):\n%s\n---\n", sys.bus.uartOutput.size(), sys.bus.uartOutput.c_str());
+
+	if (sys.logCalls)
+	{
+		std::printf("BIOS-area calls: %llu in total, %zu distinct targets\n",
+		            (unsigned long long)sys.totalCalls(), sys.callStats().size());
+		for (const System::CallStat& c : sys.callStats())
+			std::printf("  0x%08X  x%-6llu first at instr %llu (frame %llu) from 0x%08X  r4-r7 = %08X %08X %08X %08X\n",
+			            c.target, (unsigned long long)c.count, (unsigned long long)c.first.instruction,
+			            (unsigned long long)c.first.frame, c.first.caller,
+			            c.first.args[0], c.first.args[1], c.first.args[2], c.first.args[3]);
+		const auto& seq = sys.callSequence();
+		const size_t shown = seq.size() < 40 ? seq.size() : 40;
+		if (shown)
+			std::printf("call sequence (first %zu of %llu):\n", shown, (unsigned long long)sys.totalCalls());
+		for (size_t i = 0; i < shown; ++i)
+			std::printf("  #%-3zu 0x%08X from 0x%08X  r4=%08X r5=%08X  instr %llu\n", i, seq[i].target, seq[i].caller,
+			            seq[i].args[0], seq[i].args[1], (unsigned long long)seq[i].instruction);
+	}
+
+	const std::string faults = formatFaultEvents(sys.bus.cpu);
+	if (!faults.empty())
+		std::printf("fault events:\n%s", faults.c_str());
+	if (o.trace)
+		std::printf("last instructions:\n%s", formatTrace(sys.bus.cpu).c_str());
+	const std::string unmapped = sys.bus.unmappedSummary(10);
+	if (!unmapped.empty())
+		std::printf("unmapped accesses (busiest pages):\n%s", unmapped.c_str());
+	if (!sys.bus.ioLog.empty())
+	{
+		std::printf("unmapped access log (%zu entries):\n", sys.bus.ioLog.size());
+		for (const Bus::IoAccess& e : sys.bus.ioLog)
+			std::printf("  %c%u 0x%08X %s 0x%08X  pc 0x%08X\n", e.write ? 'W' : 'R', (unsigned)e.size * 8u, e.addr,
+			            e.write ? "<-" : "->", e.value, e.pc);
+	}
+
+	return (s.reason == System::StopReason::FrameLimit || s.reason == System::StopReason::InstructionLimit ||
+	        s.reason == System::StopReason::BiosCall) ? 0 : 3;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -171,6 +255,47 @@ int main(int argc, char** argv)
 	// Read the program. Nothing from the image contents is printed.
 	std::vector<uint8_t> exe;
 	const char* kind = "raw binary";
+	if (!o.bios.empty())
+	{
+		// BIOS boot: the disc image (if any) is for the CD controller, not loaded here.
+		std::vector<uint8_t> bios;
+		if (!readWholeFile(o.bios, bios))
+		{
+			std::fprintf(stderr, "cannot read %s\n", o.bios.c_str());
+			return 1;
+		}
+		System sys(o.ramMiB << 20);
+		sys.bus.cpu.setStopOnUnimplemented(o.stopOnUnimpl);
+		sys.bus.cpu.setStopOnHang(o.stopOnHang);
+		sys.bus.cpu.setTraceDepth(o.trace);
+		sys.logCalls   = o.logCalls || o.stopOnCall || o.stubCalls;
+		sys.stopOnCall = o.stopOnCall;
+		sys.stubCalls  = o.stubCalls;
+		sys.stubRamp   = o.stubRamp;
+		DiscImage disc;
+		if (!o.input.empty())
+		{
+			if (!disc.open(o.input) || disc.isBare())
+			{
+				std::fprintf(stderr, "cannot use %s as a disc: %s\n", o.input.c_str(),
+				             disc.isBare() ? "not a disc image" : disc.error().c_str());
+				return 1;
+			}
+		}
+		if (!sys.bootBios(bios.data(), bios.size(), o.resetPc))
+		{
+			std::fprintf(stderr, "BIOS of %zu bytes does not fit the ROM window\n", bios.size());
+			return 1;
+		}
+		std::printf("BIOS       : %s (%zu bytes at 0x%08X)\n", o.bios.c_str(), bios.size(), Bus::ROM_PHYS);
+		std::printf("reset PC   : 0x%08X\n", o.resetPc);
+		if (!o.input.empty())
+			sys.attachDisc(&disc);                    // after the reset inside bootBios
+		std::printf("disc       : %s\n", o.input.empty() ? "none"
+		            : (o.input + " (" + std::to_string(disc.sectorCount()) + " sectors)").c_str());
+		std::printf("RAM        : %u MiB, little-endian\n", o.ramMiB);
+		return runAndReport(sys, o);
+	}
 	if (o.raw)
 	{
 		if (!readWholeFile(o.input, exe))
@@ -217,55 +342,5 @@ int main(int argc, char** argv)
 	std::printf("endianness : %s\n", o.boot.littleEndian ? "little" : "big");
 	std::printf("RAM        : %u MiB\n", o.ramMiB);
 
-	uint64_t written = 0;
-	auto onFrame = [&](const std::vector<PPU::Color>& fb, int w, int h, uint64_t n) {
-		if (n % o.every != 0)
-			return;
-		char name[64];
-		std::snprintf(name, sizeof(name), "frame_%06llu.bmp", (unsigned long long)n);
-		const std::string path = o.outDir + "/" + name;
-		if (frame_io::writeBMP(path, fb, w, h))
-		{
-			std::printf("wrote %s (%dx%d)\n", path.c_str(), w, h);
-			++written;
-		}
-		else
-			std::fprintf(stderr, "could not write %s\n", path.c_str());
-	};
-
-	const System::RunStats s = sys.run(o.frames, o.maxInstr, onFrame);
-
-	std::printf("frames %llu, instructions %llu, CPU cycles %llu, stopped by %s, final pc 0x%08X\n",
-	            (unsigned long long)s.frames, (unsigned long long)s.instructions,
-	            (unsigned long long)s.cpuCycles, System::stopReasonName(s.reason), sys.bus.cpu.pc);
-
-	if (sys.logCalls)
-	{
-		std::printf("BIOS-area calls: %llu in total, %zu distinct targets\n",
-		            (unsigned long long)sys.totalCalls(), sys.callStats().size());
-		for (const System::CallStat& c : sys.callStats())
-			std::printf("  0x%08X  x%-6llu first at instr %llu (frame %llu) from 0x%08X  r4-r7 = %08X %08X %08X %08X\n",
-			            c.target, (unsigned long long)c.count, (unsigned long long)c.first.instruction,
-			            (unsigned long long)c.first.frame, c.first.caller,
-			            c.first.args[0], c.first.args[1], c.first.args[2], c.first.args[3]);
-		const auto& seq = sys.callSequence();
-		const size_t shown = seq.size() < 40 ? seq.size() : 40;
-		if (shown)
-			std::printf("call sequence (first %zu of %llu):\n", shown, (unsigned long long)sys.totalCalls());
-		for (size_t i = 0; i < shown; ++i)
-			std::printf("  #%-3zu 0x%08X from 0x%08X  r4=%08X r5=%08X  instr %llu\n", i, seq[i].target, seq[i].caller,
-			            seq[i].args[0], seq[i].args[1], (unsigned long long)seq[i].instruction);
-	}
-
-	const std::string faults = formatFaultEvents(sys.bus.cpu);
-	if (!faults.empty())
-		std::printf("fault events:\n%s", faults.c_str());
-	if (o.trace)
-		std::printf("last instructions:\n%s", formatTrace(sys.bus.cpu).c_str());
-	const std::string unmapped = sys.bus.unmappedSummary(10);
-	if (!unmapped.empty())
-		std::printf("unmapped accesses (busiest pages):\n%s", unmapped.c_str());
-
-	return (s.reason == System::StopReason::FrameLimit || s.reason == System::StopReason::InstructionLimit ||
-	        s.reason == System::StopReason::BiosCall) ? 0 : 3;
+	return runAndReport(sys, o);
 }

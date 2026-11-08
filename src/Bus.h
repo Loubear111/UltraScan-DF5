@@ -9,6 +9,9 @@
 #include "ppu.h"
 #include "IRQController.h"
 #include "TVE.h"
+#include "Timer.h"
+#include "I2C.h"
+#include "CdServo.h"
 #include "VideoTiming.h"
 
 class Bus
@@ -34,11 +37,24 @@ public:
 	static constexpr uint32_t DUMMY_PHYS  = 0x08240000u;
 	static constexpr uint32_t DUMMY_SIZE  = 0x10u;
 
+	// UART transmit register: the BIOS prints its boot messages by writing characters
+	// here (MAME has it commented out as a printf). Only this one word is modelled; the
+	// low byte of every write is appended to uartOutput.
+	static constexpr uint32_t UART_TX = 0x08150000u;
+	std::string uartOutput;
+
 	// Read-only ROM window (physical 0x1000_0000, alias 0x9000_0000/0xB000_0000)
 	// meant for a future BIOS image (MAME places the BIOS here). Reads beyond
 	// the loaded image return 0; writes are ignored.
 	static constexpr uint32_t ROM_PHYS   = 0x10000000u;
 	static constexpr uint32_t ROM_WINDOW = 0x01000000u;   // 16 MiB
+
+	// With a BIOS booted (System::bootBios) the image repeats every romMirror bytes
+	// through 0x1000_0000-0x1FFF_FFFF. The BIOS reads its own header through
+	// 0x1F00_0040 and copies its code from 0x1E00_1000, so it is mapped more than
+	// once [inferred from the BIOS code; MAME's exact mirror is unverified].
+	static constexpr uint32_t ROM_MIRROR_END = 0x20000000u;
+	uint32_t romMirror = 0;   // 0 = no mirroring (a loaded image fills the 16 MiB window once)
 
 	// `ramBytes` must be a power of two (RAM is mirrored by masking).
 	explicit Bus(uint32_t ramBytes = DEFAULT_RAM_SIZE);
@@ -55,6 +71,15 @@ public: // Devices on bus
 
 	// TV encoder / framebuffer scan-out registers (see TVE.h for the addresses).
 	TVE tve;
+
+	// Timer block at 0x0816_0000 (see Timer.h; inferred from the BIOS).
+	TimerBlock timers;
+
+	// I2C master and the HyperScan controller ports at 0x0813_0000 (see I2C.h).
+	I2CMaster i2c;
+
+	// CD servo and sector transfer engine at 0x0806_0000 (see CdServo.h).
+	CdServo cdservo;
 
 	// Scanline counter that drives the PPU vblank / H-V events.
 	VideoTiming video;
@@ -135,7 +160,13 @@ public: // Bus read/write, byte-addressed across the full 32-bit space.
 	std::vector<UnmappedPage> topUnmappedPages(size_t n = 10) const;
 	// One line per page from topUnmappedPages(), for the end-of-run report.
 	std::string unmappedSummary(size_t n = 10) const;
-	void clearUnmappedLog() { unmapped.clear(); }
+	void clearUnmappedLog() { unmapped.clear(); ioLog.clear(); }
+
+	// Optional detail log of unmapped accesses, one entry each (address, size, the value
+	// written, the PC of the instruction), kept up to ioLogLimit entries; 0 = off.
+	struct IoAccess { uint32_t addr; uint32_t value; uint8_t size; bool write; uint32_t pc; };
+	size_t ioLogLimit = 0;
+	mutable std::vector<IoAccess> ioLog;
 
 private:
 	static constexpr uint32_t PHYS_MASK = 0x1FFFFFFFu;
@@ -146,8 +177,12 @@ private:
 
 	static bool inPPU(uint32_t p)  { return p >= PPU_PHYS  && p < PPU_PHYS  + 0x10000u; }
 	static bool inIRQC(uint32_t p) { return p >= IRQC_PHYS && p < IRQC_PHYS + IRQController::WINDOW; }
-	static bool inRom(uint32_t p)  { return p >= ROM_PHYS  && p < ROM_PHYS  + ROM_WINDOW; }
+	bool inRom(uint32_t p) const   { return p >= ROM_PHYS  && p < (romMirror ? ROM_MIRROR_END : ROM_PHYS + ROM_WINDOW); }
 	static bool inTve(uint32_t p)   { return TVE::owns(p & ~3u); }
+	static bool inTimer(uint32_t p) { return TimerBlock::owns(p & ~3u); }
+	static bool inUart(uint32_t p)   { return (p & ~3u) == UART_TX; }
+	static bool inI2C(uint32_t p)    { return I2CMaster::owns(p & ~3u); }
+	static bool inCdServo(uint32_t p) { return CdServo::owns(p & ~3u); }
 	static bool inMiu(uint32_t p)   { return p >= (MIU_STATUS & ~3u) && p < (MIU_STATUS & ~3u) + 4u; }
 	static bool inDummy(uint32_t p) { return p >= DUMMY_PHYS && p < DUMMY_PHYS + DUMMY_SIZE; }
 
@@ -160,10 +195,18 @@ private:
 
 	struct UnmappedCount { uint64_t reads = 0; uint64_t writes = 0; };
 	mutable std::map<uint32_t, UnmappedCount> unmapped;   // key = physical page number
-	void logUnmapped(uint32_t p, bool write) const;
+	bool m_timerIrq = false;
+	bool m_i2cIrq = false;                               // last timer line level pushed to the IRQ controller
+	void logUnmapped(uint32_t p, bool write, uint32_t value, uint8_t size) const;
 
 	// Byte of the ROM window; 0 beyond the loaded image.
-	uint8_t romByte(uint32_t p) const { uint32_t o = p - ROM_PHYS; return o < rom.size() ? rom[o] : 0; }
+	uint8_t romByte(uint32_t p) const
+	{
+		uint32_t o = p - ROM_PHYS;
+		if (romMirror)
+			o %= romMirror;
+		return o < rom.size() ? rom[o] : 0;
+	}
 
 	uint32_t mmioRead32(uint32_t phys) const;
 	void     mmioWrite32(uint32_t phys, uint32_t data);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <deque>
+#include <functional>
 #include <vector>
 #include <stdint.h>
 #include <string>
@@ -142,6 +143,11 @@ public:
 	// instruction, a parallel pair or an invalid word). Read-only, for tests.
 	uint32_t lastInstr() const     { return instr; }
 	uint8_t  lastInstrSize() const { return instrSize; }
+
+	// Called with the vector number whenever an interrupt is taken (lets the bus clear
+	// edge-style sources, which MAME delivers as a one-shot pending bit).
+	std::function<void(uint8_t)> onIrqTaken;
+	uint32_t executingAddr() const { return instrAddr; }   // address of the instruction last fetched
 
 private:
 

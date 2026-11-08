@@ -194,6 +194,32 @@ bool DiscImage::readSector(uint32_t lba, uint8_t* buf)
 }
 
 // Reads `bytes` bytes starting at the first sector of an extent.
+bool DiscImage::readRawSector(uint32_t lba, uint8_t* out)
+{
+	if (!opened || bare || lba >= sectorCount())
+		return false;
+	if (sectorSize == RAW_SECTOR)
+	{
+		file.clear();
+		file.seekg((std::streamoff)((uint64_t)lba * RAW_SECTOR), std::ios::beg);
+		file.read((char*)out, RAW_SECTOR);
+		return file.gcount() == (std::streamsize)RAW_SECTOR;
+	}
+	std::memset(out, 0, RAW_SECTOR);
+	out[0] = 0x00;
+	std::memset(out + 1, 0xFF, 10);
+	out[11] = 0x00;
+	const uint32_t f = lba + 150;
+	auto bcd = [](uint32_t v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); };
+	out[12] = bcd(f / (75 * 60));
+	out[13] = bcd((f / 75) % 60);
+	out[14] = bcd(f % 75);
+	out[15] = 1;                                              // mode 1
+	if (!readSector(lba, out + 16))
+		return false;
+	return true;
+}
+
 bool DiscImage::readExtent(uint32_t lba, uint32_t bytes, std::vector<uint8_t>& out)
 {
 	if (bytes > MAX_FILE_BYTES)

@@ -35,6 +35,16 @@ public:
 	// of `name`. Returns false and sets error() on failure.
 	bool readFile(const std::string& name, std::vector<uint8_t>& out);
 
+	// Number of sectors in the (single data track of the) image; 0 for a bare file.
+	uint64_t sectorCount() const { return (opened && !bare && sectorSize) ? fileSize / sectorSize : 0; }
+
+	// One raw 2352-byte CD sector (sync, header, 2048 bytes of user data, ECC area).
+	// A MODE1/2352 image returns the stored bytes; a 2048-byte image gets a
+	// synthesized sector: sync pattern, BCD minute/second/frame of lba + 150, mode 1
+	// and the user data, with the rest zero. Returns false when lba is past the end.
+	static constexpr uint32_t RAW_SECTOR = 2352;
+	bool readRawSector(uint32_t lba, uint8_t* out2352);
+
 	// Last failure reason (empty after a successful call).
 	std::string error() const { return err; }
 

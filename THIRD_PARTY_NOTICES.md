@@ -17,6 +17,15 @@ The other files in `tools/sdis/` (`emu.h`, `score_disasm.*`, `main.cpp`) were wr
 project and are covered by the repository license (GPL-3.0). `emu.h` is a minimal stand-in for
 MAME's `emu.h` and contains no MAME code.
 
+## Peripheral behaviour derived from MAME (`src/Timer.*`, `src/I2C.*`, `src/CdServo.*`, parts of `src/Bus.*`)
+
+These files were written for this project, but their register layouts and behaviour (and the
+HyperScan controller protocol, reset values and memory map used by `System::bootBios`) were taken
+from reading MAME's `src/devices/machine/spg290_timer.cpp`, `spg290_i2c.cpp`, `spg290_cdservo.cpp`,
+`src/mame/tvgames/spg29x.cpp`, `hyperscan_ctrl.cpp` and `src/devices/cpu/score/score.cpp`
+(`license:BSD-3-Clause`, `copyright-holders:Sandro Ronco`). No MAME source file is copied into the
+repository. The BSD-3-Clause license text below applies to that derived behaviour.
+
 ### BSD-3-Clause license text
 
 Copyright (c) Sandro Ronco and the MAME contributors

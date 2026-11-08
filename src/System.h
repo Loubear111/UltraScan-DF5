@@ -5,6 +5,7 @@
 
 #include "Boot.h"
 #include "Bus.h"
+#include "DiscImage.h"
 #include "ppu.h"
 
 // ============================================================================
@@ -24,6 +25,11 @@ public:
 	// 6 cycles per instruction is the figure HyperScanEmu uses (MAME also uses a
 	// placeholder). The frame period is not shortened to compensate.
 	static constexpr uint32_t CYCLES_PER_INSTRUCTION = 6;
+
+	// What run() charges per instruction; defaults to CYCLES_PER_INSTRUCTION. MAME's
+	// score7 core charges 1, which makes the CD servo and timers run 6x slower relative
+	// to the program than here (CLI: --cycles-per-instr).
+	uint32_t cyclesPerInstruction = CYCLES_PER_INSTRUCTION;
 
 	// Applied when a run is asked for no limit at all.
 	static constexpr uint64_t DEFAULT_INSTRUCTION_CAP = 100000000ull;
@@ -89,6 +95,21 @@ public:
 	// Reset, then load an image with the fake BIOS (see Boot.h). Returns false,
 	// leaving the machine as it was, when the image does not fit.
 	bool boot(const uint8_t* data, size_t size, const BootParams& params = BootParams());
+
+	// The disc the CD servo reads from (not owned; null = no disc).
+	void attachDisc(DiscImage* disc) { bus.cdservo.attachDisc(disc); }
+
+	// Boot from a BIOS image instead of the fake loader (Phase 5, story 22): the
+	// image goes into the ROM window at Bus::ROM_PHYS (MAME puts the BIOS there),
+	// the bus becomes little-endian (the BIOS dump is) and the CPU starts at
+	// resetPc. MAME's score7 resets with PC = EXCPVEC (cr3) = 0x9F000000, which is the
+	// start of the BIOS through its mirror at 0x1F000000; its spg29x driver also sets
+	// cr29 (DREG) to 0x20000000 ("disable JTAG"), without which the BIOS spins forever
+	// at 0x100001B0. Both are applied here (the PDF documents neither).
+	// Returns false, leaving the machine as it was, when the image does not fit.
+	static constexpr uint32_t BIOS_RESET_PC = 0x9F000000u;
+	static constexpr uint32_t DREG_JTAG_DISABLED = 0x20000000u;
+	bool bootBios(const uint8_t* data, size_t size, uint32_t resetPc = BIOS_RESET_PC);
 
 	// Run until maxFrames frames were produced or maxInstructions executed
 	// (0 = no limit on that axis; with both 0 DEFAULT_INSTRUCTION_CAP applies).

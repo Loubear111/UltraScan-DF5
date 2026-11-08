@@ -41,6 +41,9 @@ public:
 	static constexpr unsigned SRC_PPU_VBLK_START = 10; // vector 53
 	static constexpr unsigned SRC_PPU_HV_HIT     = 17; // vector 46
 	static constexpr unsigned SRC_VBLK_END       = 36; // vector 27
+	static constexpr unsigned SRC_TIMER          = 7;  // vector 56 [MAME: timers on line 56]
+	static constexpr unsigned SRC_CDSERVO        = 3;  // vector 60 [MAME: CD servo on line 60]
+	static constexpr unsigned SRC_I2C            = 24; // vector 39 [MAME: I2C master on line 39]
 
 	// The software interrupt (P_I_GPUSWI) is delivered on the PPU vblank source.
 	static constexpr unsigned SRC_GPU_SWI = SRC_PPU_VBLK_START;
@@ -51,6 +54,11 @@ public:
 
 	// Drive one input line. Sources >= NUM_SOURCES are ignored.
 	void setSource(unsigned source, bool level);
+
+	// Edge-style source (MAME delivers CD servo interrupts as a one-shot pending bit):
+	// raise the line and keep it until acknowledge() is told the CPU took its vector.
+	void pulse(unsigned source);
+	bool acknowledge(uint8_t vector);   // true if a pulsed line was cleared
 
 	bool    irqActive() const    { return m_winner >= 0; }
 	uint8_t activeVector() const { return m_winner >= 0 ? vectorOf((unsigned)m_winner) : 0; }
@@ -69,6 +77,7 @@ private:
 	uint64_t m_mask  = SOURCE_MASK;
 	uint32_t m_pmst  = 0;
 	uint32_t m_pslv[4] = {0, 0, 0, 0};
+	uint64_t m_edge  = 0;   // lines raised by pulse() and not yet acknowledged
 	bool     m_swi   = false;
 	int      m_winner = -1;
 };
